@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import zotero_arxiv_daily.executor as executor_module
-from zotero_arxiv_daily.protocol import CorpusPaper, Paper
+from zotero_arxiv_daily.protocol import CorpusPaper, Paper, QualityReview
 from zotero_arxiv_daily.topic_clusterer import PaperGroup, TopicClusterer
 
 
@@ -21,6 +21,7 @@ def make_executor_config(config, *, send_empty: bool, max_paper_num: int = 10):
     executor_config.executor.reranker = "test-reranker"
     executor_config.executor.max_paper_num = max_paper_num
     executor_config.executor.send_empty = send_empty
+    executor_config.quality_filter.enabled = False
     return executor_config
 
 
@@ -68,6 +69,20 @@ def make_papers(count: int) -> list[Paper]:
     ]
 
 
+def attach_quality_review(paper: Paper, overall_score: float) -> Paper:
+    paper.quality_review = QualityReview(
+        problem=f"Problem for {paper.title}",
+        method=f"Method for {paper.title}",
+        conclusion=f"Conclusion for {paper.title}",
+        innovation_score=overall_score,
+        rigor_score=overall_score,
+        significance_score=overall_score,
+        overall_score=overall_score,
+        rationale=f"Rationale for {paper.title}",
+    )
+    return paper
+
+
 def make_render_email_recorder(calls: list, html: str = "<html>rendered email</html>"):
     def fake_render_email(groups):
         calls.append(groups)
@@ -81,6 +96,18 @@ def make_send_email_recorder(calls: list):
         calls.append((config, html))
 
     return fake_send_email
+
+
+class FakeQualityReviewer:
+    def __init__(self, _openai_client, config):
+        self.min_score = float(config.quality_filter.min_score)
+
+    def filter_high_quality(self, papers):
+        return [
+            paper
+            for paper in papers
+            if paper.quality_review is not None and paper.quality_review.overall_score >= self.min_score
+        ]
 
 
 def build_executor(monkeypatch: pytest.MonkeyPatch, config, *, retrieved_papers: list[Paper], reranked_papers: list[Paper]):
@@ -101,6 +128,7 @@ def build_executor(monkeypatch: pytest.MonkeyPatch, config, *, retrieved_papers:
     monkeypatch.setattr(executor_module, "OpenAI", DummyOpenAI)
     monkeypatch.setattr(executor_module, "get_retriever_cls", lambda _source: FakeRetriever)
     monkeypatch.setattr(executor_module, "get_reranker_cls", lambda _name: FakeReranker)
+    monkeypatch.setattr(executor_module, "QualityReviewer", FakeQualityReviewer)
 
     executor = executor_module.Executor(config)
     monkeypatch.setattr(executor, "fetch_zotero_corpus", lambda: make_corpus())
@@ -189,6 +217,73 @@ def test_executor_passes_clustered_groups_to_render_email(config, monkeypatch: p
     assert [paper.affiliations for paper in clustered_papers] == [["Affiliation 0"], ["Affiliation 1"]]
     assert render_calls == [expected_groups]
     assert send_calls == [(test_config, "<html>rendered email</html>")]
+
+
+def test_executor_filters_reviewed_papers_below_quality_threshold(config, monkeypatch: pytest.MonkeyPatch):
+    test_config = make_executor_config(config, send_empty=False, max_paper_num=3)
+    test_config.quality_filter.enabled = True
+    test_config.quality_filter.min_score = 7.0
+    test_config.quality_filter.candidate_multiplier = 2
+    reranked_papers = make_papers(5)
+    attach_quality_review(reranked_papers[0], 8.0)
+    attach_quality_review(reranked_papers[1], 6.9)
+    attach_quality_review(reranked_papers[2], 7.0)
+    attach_quality_review(reranked_papers[3], 5.0)
+    attach_quality_review(reranked_papers[4], 9.0)
+    executor = build_executor(
+        monkeypatch,
+        test_config,
+        retrieved_papers=reranked_papers,
+        reranked_papers=reranked_papers,
+    )
+
+    cluster_observed = {"cluster_calls": []}
+    render_calls = []
+    send_calls = []
+    expected_selected = [reranked_papers[0], reranked_papers[2], reranked_papers[4]]
+    expected_groups = [PaperGroup(label="Reviewed", summary="High quality papers.", papers=expected_selected)]
+
+    executor.topic_clusterer = SimpleNamespace(
+        cluster_papers=lambda papers: cluster_observed.setdefault("cluster_calls", []).append(list(papers)) or expected_groups
+    )
+    monkeypatch.setattr(executor_module, "render_email", make_render_email_recorder(render_calls))
+    monkeypatch.setattr(executor_module, "send_email", make_send_email_recorder(send_calls))
+
+    executor.run()
+
+    assert cluster_observed["cluster_calls"] == [expected_selected]
+    assert [paper.tldr for paper in expected_selected] == ["TLDR 0", "TLDR 2", "TLDR 4"]
+    assert render_calls == [expected_groups]
+    assert send_calls == [(test_config, "<html>rendered email</html>")]
+
+
+def test_executor_skips_email_when_quality_filter_removes_all_papers(config, monkeypatch: pytest.MonkeyPatch):
+    test_config = make_executor_config(config, send_empty=False, max_paper_num=3)
+    test_config.quality_filter.enabled = True
+    test_config.quality_filter.min_score = 7.0
+    reranked_papers = make_papers(2)
+    attach_quality_review(reranked_papers[0], 6.0)
+    attach_quality_review(reranked_papers[1], 6.5)
+    executor = build_executor(
+        monkeypatch,
+        test_config,
+        retrieved_papers=reranked_papers,
+        reranked_papers=reranked_papers,
+    )
+
+    cluster_observed = {"cluster_calls": []}
+    render_calls = []
+    send_calls = []
+
+    executor.topic_clusterer = make_topic_clusterer_class([], cluster_observed)(executor.openai_client, test_config.llm)
+    monkeypatch.setattr(executor_module, "render_email", make_render_email_recorder(render_calls))
+    monkeypatch.setattr(executor_module, "send_email", make_send_email_recorder(send_calls))
+
+    executor.run()
+
+    assert cluster_observed["cluster_calls"] == []
+    assert render_calls == []
+    assert send_calls == []
 
 
 def test_executor_passes_fallback_group_to_render_email(config, monkeypatch: pytest.MonkeyPatch):

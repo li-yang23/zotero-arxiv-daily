@@ -40,6 +40,11 @@ reranker:
     base_url: null # API URL of your embedding model API. Example: https://api.openai.com/v1
     model: null # The model name of the embedding model. Example: text-embedding-3-large
 
+quality_filter:
+  enabled: true # Whether to use LLM review to filter papers by research quality. Example: true
+  min_score: 7.0 # Minimum overall quality score required for email delivery. Example: 7.0
+  candidate_multiplier: 3 # Review this many times max_paper_num after relevance reranking. Example: 3
+
 executor:
   debug: false # Whether to use debug mode. Example: true
   send_empty: false # Whether to send an empty email even if no new papers today. Example: true

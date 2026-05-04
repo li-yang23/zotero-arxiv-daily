@@ -3,7 +3,7 @@ from email import message_from_string
 import pytest
 
 from zotero_arxiv_daily.construct_email import render_email
-from zotero_arxiv_daily.protocol import Paper
+from zotero_arxiv_daily.protocol import Paper, QualityReview
 from zotero_arxiv_daily.topic_clusterer import PaperGroup
 from zotero_arxiv_daily.utils import send_email
 
@@ -119,6 +119,28 @@ def test_render_email_renders_fallback_group_without_summary(papers: list[Paper]
     assert "None" not in email_content
 
 
+def test_render_email_renders_quality_review(papers: list[Paper]):
+    papers[0].quality_review = QualityReview(
+        problem="The paper studies robust tuning.",
+        method="It proposes grouped activation modulation.",
+        conclusion="It improves robustness with fewer trainable parameters.",
+        innovation_score=7.5,
+        rigor_score=8.0,
+        significance_score=7.0,
+        overall_score=7.8,
+        rationale="Solid experiments and a clear contribution.",
+    )
+    groups = [PaperGroup(label="Reviewed", summary=None, papers=[papers[0]])]
+
+    email_content = render_email(groups)
+
+    assert "<strong>Quality:</strong> 7.8/10" in email_content
+    assert "Innovation 7.5, Rigor 8.0, Significance 7.0" in email_content
+    assert "<strong>Problem:</strong> The paper studies robust tuning." in email_content
+    assert "<strong>Method:</strong> It proposes grouped activation modulation." in email_content
+    assert "<strong>Conclusion:</strong> It improves robustness with fewer trainable parameters." in email_content
+
+
 def test_render_email_escapes_group_label_and_summary_html(papers: list[Paper]):
     groups = [
         PaperGroup(
@@ -161,6 +183,28 @@ def test_render_email_escapes_grouped_paper_fields_and_pdf_url(papers: list[Pape
     assert "Paper <One>" not in email_content
     assert 'TLDR <script>alert("x")</script> & more' not in email_content
     assert 'href="https://example.com/pdf?paper=1&redirect="bad""' not in email_content
+
+
+def test_render_email_escapes_quality_review_fields(papers: list[Paper]):
+    papers[0].quality_review = QualityReview(
+        problem="<script>problem</script>",
+        method='Method with "quotes"',
+        conclusion="Conclusion & impact",
+        innovation_score=7.0,
+        rigor_score=7.0,
+        significance_score=7.0,
+        overall_score=7.0,
+        rationale="<b>Reviewer note</b>",
+    )
+    groups = [PaperGroup(label="Reviewed", summary=None, papers=[papers[0]])]
+
+    email_content = render_email(groups)
+
+    assert "&lt;script&gt;problem&lt;/script&gt;" in email_content
+    assert "Method with &quot;quotes&quot;" in email_content
+    assert "Conclusion &amp; impact" in email_content
+    assert "&lt;b&gt;Reviewer note&lt;/b&gt;" in email_content
+    assert "<script>problem</script>" not in email_content
 
 
 

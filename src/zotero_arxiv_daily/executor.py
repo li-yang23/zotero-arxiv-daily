@@ -1,15 +1,17 @@
 from loguru import logger
+from omegaconf import OmegaConf
 from pyzotero import zotero
 from omegaconf import DictConfig
 from .utils import glob_match
 from .retriever import get_retriever_cls
-from .protocol import CorpusPaper
+from .protocol import CorpusPaper, Paper
 import random
 from datetime import datetime
 from .reranker import get_reranker_cls
 from .construct_email import render_email
 from .utils import send_email
 from .topic_clusterer import TopicClusterer
+from .quality_reviewer import QualityReviewer
 from openai import OpenAI
 from tqdm import tqdm
 
@@ -23,6 +25,7 @@ class Executor:
         self.reranker = get_reranker_cls(config.executor.reranker)(config)
         self.openai_client = OpenAI(api_key=config.llm.api.key, base_url=config.llm.api.base_url)
         self.topic_clusterer = TopicClusterer(self.openai_client, config.llm)
+        self.quality_reviewer = QualityReviewer(self.openai_client, config)
 
     def fetch_zotero_corpus(self) -> list[CorpusPaper]:
         logger.info("Fetching zotero corpus")
@@ -83,7 +86,7 @@ class Executor:
         if len(all_papers) > 0:
             logger.info("Reranking papers...")
             reranked_papers = self.reranker.rerank(all_papers, corpus)
-            reranked_papers = reranked_papers[:self.config.executor.max_paper_num]
+            reranked_papers = self._select_papers_for_email(reranked_papers)
             logger.info("Generating TLDR and affiliations...")
             for p in tqdm(reranked_papers):
                 p.generate_tldr(self.openai_client, self.config.llm)
@@ -102,3 +105,19 @@ class Executor:
         email_content = render_email(grouped_papers)
         send_email(self.config, email_content)
         logger.info("Email sent successfully")
+
+    def _select_papers_for_email(self, reranked_papers: list[Paper]) -> list[Paper]:
+        max_paper_num = int(self.config.executor.max_paper_num)
+        if not OmegaConf.select(self.config, "quality_filter.enabled", default=True):
+            return reranked_papers[:max_paper_num]
+
+        multiplier = int(OmegaConf.select(self.config, "quality_filter.candidate_multiplier", default=3))
+        candidate_limit = min(len(reranked_papers), max(max_paper_num, max_paper_num * multiplier))
+        candidates = reranked_papers[:candidate_limit]
+        logger.info(
+            f"Reviewing paper quality for top {len(candidates)} relevant papers; "
+            f"threshold={self.quality_reviewer.min_score:.1f}"
+        )
+        selected = self.quality_reviewer.filter_high_quality(candidates)
+        logger.info(f"Selected {len(selected)} high-quality papers after review")
+        return selected[:max_paper_num]

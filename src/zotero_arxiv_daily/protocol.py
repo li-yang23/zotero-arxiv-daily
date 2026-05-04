@@ -8,6 +8,28 @@ from loguru import logger
 import json
 RawPaperItem = TypeVar('RawPaperItem')
 
+def truncate_text_by_tokens(text: str, max_tokens: int) -> str:
+    try:
+        enc = tiktoken.encoding_for_model("gpt-4o")
+        text_tokens = enc.encode(text)
+        return enc.decode(text_tokens[:max_tokens])
+    except Exception as e:
+        logger.warning(f"Failed to load tokenizer, falling back to character truncation: {e}")
+        return text[:max_tokens * 4]
+
+
+@dataclass
+class QualityReview:
+    problem: str
+    method: str
+    conclusion: str
+    innovation_score: float
+    rigor_score: float
+    significance_score: float
+    overall_score: float
+    rationale: str
+
+
 @dataclass
 class Paper:
     source: str
@@ -20,6 +42,7 @@ class Paper:
     tldr: Optional[str] = None
     affiliations: Optional[list[str]] = None
     score: Optional[float] = None
+    quality_review: Optional[QualityReview] = None
 
     def _generate_tldr_with_llm(self, openai_client:OpenAI,llm_params:dict) -> str:
         lang = llm_params.get('language', 'English')
@@ -37,11 +60,7 @@ class Paper:
             logger.warning(f"Neither full text nor abstract is provided for {self.url}")
             return "Failed to generate TLDR. Neither full text nor abstract is provided"
         
-        # use gpt-4o tokenizer for estimation
-        enc = tiktoken.encoding_for_model("gpt-4o")
-        prompt_tokens = enc.encode(prompt)
-        prompt_tokens = prompt_tokens[:4000]  # truncate to 4000 tokens
-        prompt = enc.decode(prompt_tokens)
+        prompt = truncate_text_by_tokens(prompt, 4000)
         
         response = openai_client.chat.completions.create(
             messages=[
@@ -70,11 +89,7 @@ class Paper:
     def _generate_affiliations_with_llm(self, openai_client:OpenAI,llm_params:dict) -> Optional[list[str]]:
         if self.full_text is not None:
             prompt = f"Given the beginning of a paper, extract the affiliations of the authors in a python list format, which is sorted by the author order. If there is no affiliation found, return an empty list '[]':\n\n{self.full_text}"
-            # use gpt-4o tokenizer for estimation
-            enc = tiktoken.encoding_for_model("gpt-4o")
-            prompt_tokens = enc.encode(prompt)
-            prompt_tokens = prompt_tokens[:2000]  # truncate to 2000 tokens
-            prompt = enc.decode(prompt_tokens)
+            prompt = truncate_text_by_tokens(prompt, 2000)
             affiliations = openai_client.chat.completions.create(
                 messages=[
                     {

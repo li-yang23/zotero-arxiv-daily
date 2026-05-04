@@ -63,7 +63,15 @@ def get_empty_html():
   """
   return block_template
 
-def get_block_html(title:str, authors:str, rate:str, tldr:str, pdf_url:str, affiliations:str=None):
+def get_block_html(
+    title: str,
+    authors: str,
+    rate: str,
+    tldr: str,
+    pdf_url: str,
+    affiliations: str = None,
+    quality_review: str = "",
+):
     block_template = """
     <table border="0" cellpadding="0" cellspacing="0" width="100%" style="font-family: Arial, sans-serif; border: 1px solid #ddd; border-radius: 8px; padding: 16px; background-color: #f9f9f9;">
     <tr>
@@ -88,6 +96,7 @@ def get_block_html(title:str, authors:str, rate:str, tldr:str, pdf_url:str, affi
             <strong>TLDR:</strong> {tldr}
         </td>
     </tr>
+    {quality_review}
 
     <tr>
         <td style="padding: 8px 0;">
@@ -96,7 +105,37 @@ def get_block_html(title:str, authors:str, rate:str, tldr:str, pdf_url:str, affi
     </tr>
 </table>
 """
-    return block_template.format(title=title, authors=authors,rate=rate, tldr=tldr, pdf_url=pdf_url, affiliations=affiliations)
+    return block_template.format(
+        title=title,
+        authors=authors,
+        rate=rate,
+        tldr=tldr,
+        pdf_url=pdf_url,
+        affiliations=affiliations,
+        quality_review=quality_review,
+    )
+
+
+def get_quality_review_html(paper: Paper) -> str:
+    review = paper.quality_review
+    if review is None:
+        return ""
+    quality_score = round(review.overall_score, 1)
+    innovation_score = round(review.innovation_score, 1)
+    rigor_score = round(review.rigor_score, 1)
+    significance_score = round(review.significance_score, 1)
+    return f"""
+    <tr>
+        <td style="font-size: 14px; color: #333; padding: 8px 0;">
+            <strong>Quality:</strong> {quality_score}/10
+            (Innovation {innovation_score}, Rigor {rigor_score}, Significance {significance_score})
+            <br><strong>Problem:</strong> {escape(review.problem)}
+            <br><strong>Method:</strong> {escape(review.method)}
+            <br><strong>Conclusion:</strong> {escape(review.conclusion)}
+            <br><strong>Reviewer Note:</strong> {escape(review.rationale)}
+        </td>
+    </tr>
+"""
 
 def get_stars(score:float):
     full_star = '<span class="full-star">⭐</span>'
@@ -135,8 +174,9 @@ def _render_paper_html(paper: Paper) -> str:
         escape(authors),
         rate,
         escape(paper.tldr or ''),
-        escape(paper.pdf_url),
+        escape(paper.pdf_url or paper.url),
         escape(affiliations),
+        get_quality_review_html(paper),
     )
 
 
