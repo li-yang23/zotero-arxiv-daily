@@ -71,3 +71,33 @@ def test_arxiv_retriever(config, monkeypatch):
     paper_titles = [i.title for i in papers]
     parsed_titles = [i.title for i in parsed_results]
     assert set(paper_titles) == set(parsed_titles)
+
+
+def test_arxiv_retriever_falls_back_to_rss_when_api_is_rate_limited(config, monkeypatch):
+    parsed_result = feedparser.parse("tests/retriever/arxiv_rss_example.xml")
+    raw_parser = feedparser.parse
+
+    def mock_feedparser_parse(url):
+        if url == f"https://rss.arxiv.org/atom/{'+'.join(config.source.arxiv.category)}":
+            return parsed_result
+        return raw_parser(url)
+
+    class RateLimitedArxivClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def results(self, search):
+            raise arxiv_retriever_module.arxiv.HTTPError("https://export.arxiv.org/api/query", 0, 429)
+
+    monkeypatch.setattr(feedparser, "parse", mock_feedparser_parse)
+    monkeypatch.setattr(arxiv_retriever_module.arxiv, "Client", RateLimitedArxivClient)
+    monkeypatch.setattr(retriever_base_module, "ProcessPoolExecutor", InlineExecutor)
+
+    retriever = ArxivRetriever(config)
+    papers = retriever.retrieve_papers()
+    parsed_results = [i for i in parsed_result.entries if i.get("arxiv_announce_type", "new") == "new"]
+
+    assert len(papers) == len(parsed_results)
+    assert {paper.title for paper in papers} == {entry.title for entry in parsed_results}
+    assert all(paper.source == "arxiv" for paper in papers)
+    assert all(paper.abstract for paper in papers)
