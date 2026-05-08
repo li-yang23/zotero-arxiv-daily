@@ -1,6 +1,7 @@
 import json
 from typing import Any
 
+import httpx
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
 from openai import OpenAI, OpenAIError
@@ -44,7 +45,7 @@ class QualityReviewer:
             )
             content = response.choices[0].message.content
             return self._parse_review(content)
-        except OpenAIError as exc:
+        except (OpenAIError, httpx.HTTPError) as exc:
             logger.warning(f"Quality review request failed for {paper.url}: {exc}")
         except (ValueError, TypeError, KeyError, IndexError, json.JSONDecodeError) as exc:
             logger.warning(f"Invalid quality review output for {paper.url}: {exc}")

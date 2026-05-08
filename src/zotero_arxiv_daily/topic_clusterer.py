@@ -3,6 +3,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from loguru import logger
 from openai import OpenAI, OpenAIError
 
@@ -59,7 +60,7 @@ class TopicClusterer:
                 parsed_groups = self._parse_groups(content)
                 self._validate_groups(parsed_groups, len(papers))
                 return self._materialize_groups(parsed_groups, papers)
-            except OpenAIError as exc:
+            except (OpenAIError, httpx.HTTPError) as exc:
                 logger.warning(f"Topic clustering request failed without retry: {exc}")
                 return None
             except (ValueError, TypeError, KeyError, IndexError) as exc:

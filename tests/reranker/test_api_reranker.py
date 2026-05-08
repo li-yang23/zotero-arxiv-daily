@@ -35,6 +35,8 @@ def test_api_reranker(config, monkeypatch):
     assert observed["init_kwargs"] == {
         "api_key": config.reranker.api.key,
         "base_url": config.reranker.api.base_url,
+        "timeout": float(config.reranker.api.timeout),
+        "max_retries": int(config.reranker.api.max_retries),
     }
     assert observed["request"] == {
         "input": ["hello", "world", "ping"],

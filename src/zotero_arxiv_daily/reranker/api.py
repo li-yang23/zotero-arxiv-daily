@@ -4,7 +4,12 @@ import numpy as np
 @register_reranker("api")
 class ApiReranker(BaseReranker):
     def get_similarity_score(self, s1: list[str], s2: list[str]) -> np.ndarray:
-        client = OpenAI(api_key=self.config.reranker.api.key, base_url=self.config.reranker.api.base_url)
+        client = OpenAI(
+            api_key=self.config.reranker.api.key,
+            base_url=self.config.reranker.api.base_url,
+            timeout=float(self.config.reranker.api.timeout),
+            max_retries=int(self.config.reranker.api.max_retries),
+        )
         response = client.embeddings.create(
             input=s1 + s2,
             model=self.config.reranker.api.model

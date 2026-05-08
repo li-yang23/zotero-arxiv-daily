@@ -1,19 +1,24 @@
 from types import SimpleNamespace
 
+import httpx
+
 from zotero_arxiv_daily.protocol import Paper
 from zotero_arxiv_daily.quality_reviewer import QualityReviewer
 
 
 class FakeChatClient:
-    def __init__(self, responses: list[str]):
+    def __init__(self, responses: list[str | Exception]):
         self.responses = list(responses)
         self.requests = []
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
 
     def create(self, *args, **kwargs):
         self.requests.append(kwargs)
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
         return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=self.responses.pop(0)))]
+            choices=[SimpleNamespace(message=SimpleNamespace(content=response))]
         )
 
 
@@ -63,6 +68,17 @@ def test_quality_reviewer_excludes_invalid_review(config):
     client = FakeChatClient(['{"problem": "missing required fields"}'])
     reviewer = QualityReviewer(client, config)
     papers = [make_paper("invalid")]
+
+    selected = reviewer.filter_high_quality(papers)
+
+    assert selected == []
+    assert papers[0].quality_review is None
+
+
+def test_quality_reviewer_handles_httpx_timeout(config):
+    client = FakeChatClient([httpx.ReadTimeout("read timed out")])
+    reviewer = QualityReviewer(client, config)
+    papers = [make_paper("timeout")]
 
     selected = reviewer.filter_high_quality(papers)
 

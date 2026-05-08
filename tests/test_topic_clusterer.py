@@ -1,6 +1,7 @@
 import json
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from openai import OpenAIError
 
@@ -258,6 +259,19 @@ def test_cluster_papers_requests_json_output_mode(llm_config):
 def test_cluster_papers_does_not_retry_on_transport_failure(llm_config):
     papers = make_six_papers()
     client = FakeChatClient([FakeTransportError("gateway down")])
+
+    groups = TopicClusterer(client, llm_config).cluster_papers(papers)
+
+    assert client.calls == 1
+    assert len(groups) == 1
+    assert groups[0].label == "Relevant papers today"
+    assert groups[0].summary is None
+    assert groups[0].papers == papers
+
+
+def test_cluster_papers_falls_back_on_httpx_timeout(llm_config):
+    papers = make_six_papers()
+    client = FakeChatClient([httpx.ReadTimeout("read timed out")])
 
     groups = TopicClusterer(client, llm_config).cluster_papers(papers)
 

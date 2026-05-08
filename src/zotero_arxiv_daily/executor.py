@@ -23,7 +23,12 @@ class Executor:
             source: get_retriever_cls(source)(config) for source in config.executor.source
         }
         self.reranker = get_reranker_cls(config.executor.reranker)(config)
-        self.openai_client = OpenAI(api_key=config.llm.api.key, base_url=config.llm.api.base_url)
+        self.openai_client = OpenAI(
+            api_key=config.llm.api.key,
+            base_url=config.llm.api.base_url,
+            timeout=float(config.llm.api.timeout),
+            max_retries=int(config.llm.api.max_retries),
+        )
         self.topic_clusterer = TopicClusterer(self.openai_client, config.llm)
         self.quality_reviewer = QualityReviewer(self.openai_client, config)
 
@@ -85,7 +90,7 @@ class Executor:
         reranked_papers = []
         if len(all_papers) > 0:
             logger.info("Reranking papers...")
-            reranked_papers = self.reranker.rerank(all_papers, corpus)
+            reranked_papers = self._rerank_or_fallback(all_papers, corpus)
             reranked_papers = self._select_papers_for_email(reranked_papers)
             logger.info("Generating TLDR and affiliations...")
             for p in tqdm(reranked_papers):
@@ -105,6 +110,15 @@ class Executor:
         email_content = render_email(grouped_papers)
         send_email(self.config, email_content)
         logger.info("Email sent successfully")
+
+    def _rerank_or_fallback(self, papers: list[Paper], corpus: list[CorpusPaper]) -> list[Paper]:
+        try:
+            return self.reranker.rerank(papers, corpus)
+        except Exception as exc:
+            logger.warning(
+                f"Reranking failed; falling back to retrieved paper order so the workflow can continue: {exc}"
+            )
+            return list(papers)
 
     def _select_papers_for_email(self, reranked_papers: list[Paper]) -> list[Paper]:
         max_paper_num = int(self.config.executor.max_paper_num)

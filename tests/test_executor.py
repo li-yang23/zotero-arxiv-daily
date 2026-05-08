@@ -2,6 +2,7 @@ from copy import deepcopy
 from datetime import datetime
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 import zotero_arxiv_daily.executor as executor_module
@@ -177,6 +178,12 @@ def test_executor_initializes_topic_clusterer_with_openai_client_and_llm_config(
     )
 
     assert isinstance(executor.openai_client, DummyOpenAI)
+    assert executor.openai_client.kwargs == {
+        "api_key": test_config.llm.api.key,
+        "base_url": test_config.llm.api.base_url,
+        "timeout": float(test_config.llm.api.timeout),
+        "max_retries": int(test_config.llm.api.max_retries),
+    }
     assert isinstance(executor.topic_clusterer, fake_topic_clusterer_cls)
     assert cluster_observed["init_args"] == (executor.openai_client, test_config.llm)
 
@@ -215,6 +222,40 @@ def test_executor_passes_clustered_groups_to_render_email(config, monkeypatch: p
     assert clustered_papers == reranked_papers[:2]
     assert [paper.tldr for paper in clustered_papers] == ["TLDR 0", "TLDR 1"]
     assert [paper.affiliations for paper in clustered_papers] == [["Affiliation 0"], ["Affiliation 1"]]
+    assert render_calls == [expected_groups]
+    assert send_calls == [(test_config, "<html>rendered email</html>")]
+
+
+def test_executor_falls_back_to_retrieved_order_when_reranker_times_out(config, monkeypatch: pytest.MonkeyPatch):
+    test_config = make_executor_config(config, send_empty=False, max_paper_num=2)
+    papers = make_papers(3)
+    executor = build_executor(
+        monkeypatch,
+        test_config,
+        retrieved_papers=papers,
+        reranked_papers=[],
+    )
+
+    def raise_timeout(_papers, _corpus):
+        raise httpx.ReadTimeout("read timed out")
+
+    expected_groups = [PaperGroup(label="Fallback", summary="Fallback order.", papers=papers[:2])]
+    cluster_observed = {"cluster_calls": []}
+    render_calls = []
+    send_calls = []
+
+    executor.reranker = SimpleNamespace(rerank=raise_timeout)
+    executor.topic_clusterer = SimpleNamespace(
+        cluster_papers=lambda selected: cluster_observed.setdefault("cluster_calls", []).append(list(selected))
+        or expected_groups
+    )
+    monkeypatch.setattr(executor_module, "render_email", make_render_email_recorder(render_calls))
+    monkeypatch.setattr(executor_module, "send_email", make_send_email_recorder(send_calls))
+
+    executor.run()
+
+    assert cluster_observed["cluster_calls"] == [papers[:2]]
+    assert [paper.tldr for paper in papers[:2]] == ["TLDR 0", "TLDR 1"]
     assert render_calls == [expected_groups]
     assert send_calls == [(test_config, "<html>rendered email</html>")]
 

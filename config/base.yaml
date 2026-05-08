@@ -22,6 +22,8 @@ llm:
   api:
     key: ??? # API Key of your LLM API. Example: sk-xxx
     base_url: ??? # API URL of your LLM API. Example: https://api.openai.com/v1
+    timeout: 120 # Timeout in seconds for each LLM API request. Example: 120
+    max_retries: 3 # Number of retries for transient LLM API failures. Example: 3
   generation_kwargs:
   # Arguments for the LLM API. See [here](https://platform.openai.com/docs/api-reference/chat/create) for more details.
     max_tokens: 16384
@@ -39,6 +41,8 @@ reranker:
     key: null # API Key of your embedding model API. Example: sk-xxx
     base_url: null # API URL of your embedding model API. Example: https://api.openai.com/v1
     model: null # The model name of the embedding model. Example: text-embedding-3-large
+    timeout: 120 # Timeout in seconds for each embedding API request. Example: 120
+    max_retries: 3 # Number of retries for transient embedding API failures. Example: 3
 
 quality_filter:
   enabled: true # Whether to use LLM review to filter papers by research quality. Example: true
