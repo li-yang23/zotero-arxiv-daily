@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import feedparser
+import pytest
 
 import zotero_arxiv_daily.retriever.arxiv_retriever as arxiv_retriever_module
 import zotero_arxiv_daily.retriever.base as retriever_base_module
@@ -20,6 +21,10 @@ class InlineExecutor:
 
     def map(self, func, values):
         return [func(value) for value in values]
+
+
+def daily_rss_entries(entries):
+    return [entry for entry in entries if entry.get("arxiv_announce_type") != "replace"]
 
 
 def test_arxiv_retriever(config, monkeypatch):
@@ -66,7 +71,7 @@ def test_arxiv_retriever(config, monkeypatch):
     
     retriever = ArxivRetriever(config)
     papers = retriever.retrieve_papers()
-    parsed_results = [i for i in parsed_result.entries if i.get("arxiv_announce_type","new") == 'new']
+    parsed_results = daily_rss_entries(parsed_result.entries)
     assert len(papers) == len(parsed_results)
     paper_titles = [i.title for i in papers]
     parsed_titles = [i.title for i in parsed_results]
@@ -95,9 +100,23 @@ def test_arxiv_retriever_falls_back_to_rss_when_api_is_rate_limited(config, monk
 
     retriever = ArxivRetriever(config)
     papers = retriever.retrieve_papers()
-    parsed_results = [i for i in parsed_result.entries if i.get("arxiv_announce_type", "new") == "new"]
+    parsed_results = daily_rss_entries(parsed_result.entries)
 
     assert len(papers) == len(parsed_results)
     assert {paper.title for paper in papers} == {entry.title for entry in parsed_results}
     assert all(paper.source == "arxiv" for paper in papers)
     assert all(paper.abstract for paper in papers)
+
+
+def test_arxiv_retriever_raises_when_rss_parse_fails_empty(config, monkeypatch):
+    failed_feed = feedparser.FeedParserDict(
+        bozo=True,
+        bozo_exception=RuntimeError("dns failed"),
+        entries=[],
+        feed=feedparser.FeedParserDict(title=None),
+    )
+    monkeypatch.setattr(feedparser, "parse", lambda _url: failed_feed)
+
+    retriever = ArxivRetriever(config)
+    with pytest.raises(RuntimeError, match="Failed to parse arXiv RSS feed"):
+        retriever._retrieve_raw_papers()

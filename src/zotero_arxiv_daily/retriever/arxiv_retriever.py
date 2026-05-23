@@ -9,6 +9,7 @@ import feedparser
 from urllib.request import urlretrieve
 from tqdm import tqdm
 import os
+from collections import Counter
 from omegaconf import OmegaConf
 from loguru import logger
 
@@ -38,15 +39,21 @@ class ArxivRetriever(BaseRetriever):
         query = '+'.join(self.config.source.arxiv.category)
         # Get the latest paper from arxiv rss feed
         feed = feedparser.parse(f"https://rss.arxiv.org/atom/{query}")
-        if 'Feed error for query' in feed.feed.title:
+        if feed.get("bozo") and len(feed.entries) == 0:
+            raise RuntimeError(f"Failed to parse arXiv RSS feed for {query}: {feed.get('bozo_exception')}")
+        feed_title = feed.feed.get("title", "")
+        if 'Feed error for query' in feed_title:
             raise Exception(f"Invalid ARXIV_QUERY: {query}.")
         raw_papers: list[ArxivResult | RssArxivResult] = []
+        announce_type_counts = Counter(i.get("arxiv_announce_type", "unknown") for i in feed.entries)
+        logger.info(f"arXiv RSS returned {len(feed.entries)} entries for {query}: {dict(announce_type_counts)}")
         rss_entries = {
             i.id.removeprefix("oai:arXiv.org:"): i
             for i in feed.entries
-            if i.get("arxiv_announce_type", "new") == "new"
+            if self._is_daily_candidate(i)
         }
         all_paper_ids = list(rss_entries.keys())
+        logger.info(f"Selected {len(all_paper_ids)} new or cross-listed arXiv entries for processing")
         if self.config.executor.debug:
             all_paper_ids = all_paper_ids[:10]
 
@@ -66,6 +73,10 @@ class ArxivRetriever(BaseRetriever):
         bar.close()
 
         return raw_papers
+
+    def _is_daily_candidate(self, entry) -> bool:
+        announce_type = entry.get("arxiv_announce_type")
+        return announce_type != "replace"
 
     def _rss_entries_to_raw_papers(self, rss_entries: dict[str, object], paper_ids: list[str]) -> list[RssArxivResult]:
         return [

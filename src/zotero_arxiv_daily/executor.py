@@ -134,4 +134,10 @@ class Executor:
         )
         selected = self.quality_reviewer.filter_high_quality(candidates)
         logger.info(f"Selected {len(selected)} high-quality papers after review")
+        if len(selected) == 0 and len(candidates) > 0:
+            logger.warning(
+                "Quality filter removed every candidate; falling back to top reranked papers "
+                "to avoid reporting a false no-paper day."
+            )
+            return reranked_papers[:max_paper_num]
         return selected[:max_paper_num]

@@ -298,7 +298,10 @@ def test_executor_filters_reviewed_papers_below_quality_threshold(config, monkey
     assert send_calls == [(test_config, "<html>rendered email</html>")]
 
 
-def test_executor_skips_email_when_quality_filter_removes_all_papers(config, monkeypatch: pytest.MonkeyPatch):
+def test_executor_falls_back_to_reranked_papers_when_quality_filter_removes_all_papers(
+    config,
+    monkeypatch: pytest.MonkeyPatch,
+):
     test_config = make_executor_config(config, send_empty=False, max_paper_num=3)
     test_config.quality_filter.enabled = True
     test_config.quality_filter.min_score = 7.0
@@ -315,16 +318,20 @@ def test_executor_skips_email_when_quality_filter_removes_all_papers(config, mon
     cluster_observed = {"cluster_calls": []}
     render_calls = []
     send_calls = []
+    expected_groups = [PaperGroup(label="Fallback", summary="Top reranked papers.", papers=reranked_papers)]
 
-    executor.topic_clusterer = make_topic_clusterer_class([], cluster_observed)(executor.openai_client, test_config.llm)
+    executor.topic_clusterer = make_topic_clusterer_class(expected_groups, cluster_observed)(
+        executor.openai_client,
+        test_config.llm,
+    )
     monkeypatch.setattr(executor_module, "render_email", make_render_email_recorder(render_calls))
     monkeypatch.setattr(executor_module, "send_email", make_send_email_recorder(send_calls))
 
     executor.run()
 
-    assert cluster_observed["cluster_calls"] == []
-    assert render_calls == []
-    assert send_calls == []
+    assert cluster_observed["cluster_calls"] == [reranked_papers]
+    assert render_calls == [expected_groups]
+    assert send_calls == [(test_config, "<html>rendered email</html>")]
 
 
 def test_executor_passes_fallback_group_to_render_email(config, monkeypatch: pytest.MonkeyPatch):

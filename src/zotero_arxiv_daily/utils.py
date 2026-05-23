@@ -2,15 +2,66 @@ import tarfile
 import re
 import glob
 import smtplib
+import os
+import sys
+import tempfile
 from email.header import Header
 from email.mime.text import MIMEText
 from email.utils import parseaddr, formataddr
+from contextlib import contextmanager
 from loguru import logger
 import datetime
 from omegaconf import DictConfig
-import pymupdf.layout
-pymupdf.layout.activate()
-import pymupdf4llm
+
+_PYMUPDF_LAYOUT_ACTIVATED = False
+_IGNORED_MUPDF_STDERR_MESSAGES = (
+    "MuPDF error: format error: cmsOpenProfileFromMem failed",
+)
+
+
+def _load_pymupdf4llm():
+    global _PYMUPDF_LAYOUT_ACTIVATED
+    if not _PYMUPDF_LAYOUT_ACTIVATED:
+        import pymupdf.layout
+        pymupdf.layout.activate()
+        _PYMUPDF_LAYOUT_ACTIVATED = True
+
+    import pymupdf4llm
+    return pymupdf4llm
+
+
+def _remove_ignored_mupdf_stderr(stderr_output: str) -> str:
+    kept_lines = [
+        line
+        for line in stderr_output.splitlines(keepends=True)
+        if not any(ignored in line for ignored in _IGNORED_MUPDF_STDERR_MESSAGES)
+    ]
+    return "".join(kept_lines)
+
+
+@contextmanager
+def _filter_mupdf_stderr():
+    """Suppress known MuPDF ICC profile noise while preserving other stderr."""
+    sys.stderr.flush()
+    original_stderr_fd = os.dup(2)
+    try:
+        with tempfile.TemporaryFile(mode="w+b") as captured_stderr:
+            os.dup2(captured_stderr.fileno(), 2)
+            try:
+                yield
+            finally:
+                sys.stderr.flush()
+                os.dup2(original_stderr_fd, 2)
+                captured_stderr.seek(0)
+                filtered_output = _remove_ignored_mupdf_stderr(
+                    captured_stderr.read().decode(errors="replace")
+                )
+                if filtered_output:
+                    os.write(original_stderr_fd, filtered_output.encode())
+    finally:
+        os.close(original_stderr_fd)
+
+
 def extract_tex_code_from_tar(file_path:str, paper_id:str) -> dict[str,str]:
     try:
         tar = tarfile.open(file_path)
@@ -82,7 +133,9 @@ def extract_tex_code_from_tar(file_path:str, paper_id:str) -> dict[str,str]:
     return file_contents
 
 def extract_markdown_from_pdf(file_path:str) -> str:
-    return pymupdf4llm.to_markdown(file_path,use_ocr=False,header=False,footer=False,ignore_code=True)
+    pymupdf4llm = _load_pymupdf4llm()
+    with _filter_mupdf_stderr():
+        return pymupdf4llm.to_markdown(file_path,use_ocr=False,header=False,footer=False,ignore_code=True)
 
 def glob_match(path:str, pattern:str) -> bool:
     re_pattern = glob.translate(pattern,recursive=True)
