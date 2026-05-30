@@ -23,6 +23,7 @@ class TopicClusterer:
     def __init__(self, openai_client: OpenAI, llm_params: dict):
         self.openai_client = openai_client
         self.llm_params = llm_params
+        self.language = str(llm_params.get("language", "English"))
 
     @classmethod
     def _is_generic_label(cls, label: str) -> bool:
@@ -72,7 +73,10 @@ class TopicClusterer:
 
     def _build_prompt_payload(self, papers: list[Paper]) -> dict[str, Any]:
         return {
-            "instruction": "Cluster these papers into 3 to 5 topic groups when feasible.",
+            "instruction": (
+                "Cluster these papers into 3 to 5 topic groups when feasible. "
+                f"Write every group label and summary in {self.language}."
+            ),
             "papers": [
                 {
                     "index": index,
@@ -86,7 +90,8 @@ class TopicClusterer:
     def _system_prompt(self, strict: bool) -> str:
         prompt = (
             "You group scientific papers by topic. Return a JSON object with a top-level 'groups' array. "
-            "Each group must include 'label', 'summary', and 'paper_indices'."
+            "Each group must include 'label', 'summary', and 'paper_indices'. "
+            f"Write all group labels and summaries in {self.language}."
         )
         if strict:
             prompt += (
@@ -158,4 +163,9 @@ class TopicClusterer:
         return [group for _, group in materialized]
 
     def _fallback_group(self, papers: list[Paper]) -> PaperGroup:
-        return PaperGroup(label="Relevant papers today", summary=None, papers=papers)
+        label = "今日相关论文" if self._uses_chinese() else "Relevant papers today"
+        return PaperGroup(label=label, summary=None, papers=papers)
+
+    def _uses_chinese(self) -> bool:
+        normalized_language = self.language.strip().lower()
+        return "chinese" in normalized_language or "中文" in normalized_language or normalized_language.startswith("zh")

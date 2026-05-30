@@ -31,7 +31,7 @@ llm:
   # Arguments for the LLM API. See [here](https://platform.openai.com/docs/api-reference/chat/create) for more details.
     max_tokens: 16384
     model: ???
-  language: English # Preferred language for the TL;DR. Example: English
+  language: Chinese # Preferred language for generated summaries and reviews. Example: Chinese
 
 reranker:
   local:
@@ -56,6 +56,6 @@ executor:
   debug: false # Whether to use debug mode. Example: true
   send_empty: false # Whether to send an empty email even if no new papers today. Example: true
   max_workers: 4 # Concurrent workers for processing papers. Example: 4
-  max_paper_num: 50 # The maximum number of the papers presented in the email. Example: 50
+  max_paper_num: 25 # The maximum number of the papers presented in the email. Example: 25
   source: ??? # The sources of papers to retrieve. Example: ['arxiv','biorxiv','medrxiv']
   reranker: local # The reranker to use. Example: 'local' or 'api'

@@ -88,6 +88,8 @@ def test_cluster_papers_returns_sorted_groups_from_valid_json(llm_config):
     assert [paper.title for paper in groups[2].papers] == ["D", "E"]
 
     payload = json.loads(client.requests[0]["messages"][1]["content"])
+    assert "Write every group label and summary in English" in payload["instruction"]
+    assert "Write all group labels and summaries in English" in client.requests[0]["messages"][0]["content"]
     assert payload["papers"][0] == {
         "index": 0,
         "title": "A",
@@ -128,6 +130,36 @@ def test_cluster_papers_skips_llm_when_too_few_papers(llm_config):
     assert groups[0].summary is None
     assert groups[0].papers == papers
     assert client.calls == 0
+
+
+def test_cluster_papers_uses_chinese_for_group_prompt_and_fallback_label():
+    papers = make_three_papers()
+    client = FakeChatClient('{"groups": []}')
+    llm_config = {"language": "Chinese", "generation_kwargs": {}}
+
+    groups = TopicClusterer(client, llm_config).cluster_papers(papers)
+
+    assert len(groups) == 1
+    assert groups[0].label == "今日相关论文"
+    assert groups[0].summary is None
+    assert groups[0].papers == papers
+    assert client.calls == 0
+
+    prompt_client = FakeChatClient(
+        """{
+  \"groups\": [
+    {\"label\": \"智能体系统\", \"summary\": \"这些论文研究智能体系统。\", \"paper_indices\": [3, 4]},
+    {\"label\": \"视觉理解\", \"summary\": \"这些论文研究视觉理解。\", \"paper_indices\": [0, 2]},
+    {\"label\": \"推理方法\", \"summary\": \"这些论文研究推理方法。\", \"paper_indices\": [1, 5]}
+  ]
+}"""
+    )
+
+    TopicClusterer(prompt_client, llm_config).cluster_papers(make_six_papers())
+
+    payload = json.loads(prompt_client.requests[0]["messages"][1]["content"])
+    assert "Write every group label and summary in Chinese" in payload["instruction"]
+    assert "Write all group labels and summaries in Chinese" in prompt_client.requests[0]["messages"][0]["content"]
 
 
 def test_cluster_papers_retries_once_on_invalid_then_succeeds(llm_config):

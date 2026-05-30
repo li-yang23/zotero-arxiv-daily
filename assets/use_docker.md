@@ -46,12 +46,12 @@ environment:
       - ZOTERO_IGNORE=already_read_papers
       - ARXIV_QUERY=cs.AI+cs.CV+cs.LG+cs.CL
       - SEND_EMPTY=False
-      - MAX_PAPER_NUM=5
+      - MAX_PAPER_NUM=25
       - USE_LLM_API=1
       - OPENAI_API_KEY=sk-your-openai-key-here
       - OPENAI_API_BASE=https://api.openai.com/v1
       - MODEL_NAME=Qwen/Qwen1.5-7B-Instruct
-      - LANGUAGE=English
+      - LANGUAGE=Chinese
       
       # 新增配置
       - HF_ENDPOINT=https://hf-mirror.com

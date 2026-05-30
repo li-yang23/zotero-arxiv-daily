@@ -359,7 +359,7 @@ def test_executor_passes_fallback_group_to_render_email(config, monkeypatch: pyt
     assert len(render_calls) == 1
     grouped_papers = render_calls[0]
     assert len(grouped_papers) == 1
-    assert grouped_papers[0].label == "Relevant papers today"
+    assert grouped_papers[0].label == "今日相关论文"
     assert grouped_papers[0].summary is None
     assert grouped_papers[0].papers == reranked_papers
     assert send_calls == [(test_config, "<html>rendered email</html>")]
