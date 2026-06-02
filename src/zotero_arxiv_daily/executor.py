@@ -107,7 +107,7 @@ class Executor:
             grouped_papers = self.topic_clusterer.cluster_papers(reranked_papers)
 
         logger.info("Sending email...")
-        email_content = render_email(grouped_papers)
+        email_content = render_email(grouped_papers, self.config.llm.language)
         send_email(self.config, email_content)
         logger.info("Email sent successfully")
 

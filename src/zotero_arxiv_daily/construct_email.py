@@ -11,6 +11,45 @@ GROUP_SUMMARY_STYLE = "font-family: Arial, sans-serif; font-size: 14px; color: #
 PAPER_SPACING = '<br></br><br>'
 
 
+def _uses_chinese(language: str | None) -> bool:
+    normalized_language = (language or "").strip().lower()
+    return "chinese" in normalized_language or "中文" in normalized_language or normalized_language.startswith("zh")
+
+
+def _email_labels(language: str | None) -> dict[str, str]:
+    if _uses_chinese(language):
+        return {
+            "empty": "今天没有新论文，可以休息一下。",
+            "unsubscribe": "如需退订，请从 GitHub Action 设置中移除你的邮箱。",
+            "affiliation_unknown": "未知机构",
+            "relevance": "相关度",
+            "tldr": "论文总结",
+            "quality": "质量评分",
+            "innovation": "创新性",
+            "rigor": "严谨性",
+            "significance": "重要性",
+            "problem": "问题",
+            "method": "方法",
+            "conclusion": "结论",
+            "reviewer_note": "评审备注",
+        }
+    return {
+        "empty": "No Papers Today. Take a Rest!",
+        "unsubscribe": "To unsubscribe, remove your email in your Github Action setting.",
+        "affiliation_unknown": "Unknown Affiliation",
+        "relevance": "Relevance",
+        "tldr": "TLDR",
+        "quality": "Quality",
+        "innovation": "Innovation",
+        "rigor": "Rigor",
+        "significance": "Significance",
+        "problem": "Problem",
+        "method": "Method",
+        "conclusion": "Conclusion",
+        "reviewer_note": "Reviewer Note",
+    }
+
+
 
 
 framework = """
@@ -44,24 +83,24 @@ framework = """
 
 <br><br>
 <div>
-To unsubscribe, remove your email in your Github Action setting.
+__UNSUBSCRIBE__
 </div>
 
 </body>
 </html>
 """
 
-def get_empty_html():
+def get_empty_html(labels: dict[str, str]):
   block_template = """
   <table border="0" cellpadding="0" cellspacing="0" width="100%" style="font-family: Arial, sans-serif; border: 1px solid #ddd; border-radius: 8px; padding: 16px; background-color: #f9f9f9;">
   <tr>
     <td style="font-size: 20px; font-weight: bold; color: #333;">
-        No Papers Today. Take a Rest!
+        {empty}
     </td>
   </tr>
   </table>
   """
-  return block_template
+  return block_template.format(empty=labels["empty"])
 
 def get_block_html(
     title: str,
@@ -69,6 +108,7 @@ def get_block_html(
     rate: str,
     tldr: str,
     pdf_url: str,
+    labels: dict[str, str],
     affiliations: str = None,
     quality_review: str = "",
 ):
@@ -88,12 +128,12 @@ def get_block_html(
     </tr>
     <tr>
         <td style="font-size: 14px; color: #333; padding: 8px 0;">
-            <strong>Relevance:</strong> {rate}
+            <strong>{relevance_label}:</strong> {rate}
         </td>
     </tr>
     <tr>
         <td style="font-size: 14px; color: #333; padding: 8px 0;">
-            <strong>TLDR:</strong> {tldr}
+            <strong>{tldr_label}:</strong> {tldr}
         </td>
     </tr>
     {quality_review}
@@ -111,12 +151,14 @@ def get_block_html(
         rate=rate,
         tldr=tldr,
         pdf_url=pdf_url,
+        relevance_label=labels["relevance"],
+        tldr_label=labels["tldr"],
         affiliations=affiliations,
         quality_review=quality_review,
     )
 
 
-def get_quality_review_html(paper: Paper) -> str:
+def get_quality_review_html(paper: Paper, labels: dict[str, str]) -> str:
     review = paper.quality_review
     if review is None:
         return ""
@@ -127,12 +169,12 @@ def get_quality_review_html(paper: Paper) -> str:
     return f"""
     <tr>
         <td style="font-size: 14px; color: #333; padding: 8px 0;">
-            <strong>Quality:</strong> {quality_score}/10
-            (Innovation {innovation_score}, Rigor {rigor_score}, Significance {significance_score})
-            <br><strong>Problem:</strong> {escape(review.problem)}
-            <br><strong>Method:</strong> {escape(review.method)}
-            <br><strong>Conclusion:</strong> {escape(review.conclusion)}
-            <br><strong>Reviewer Note:</strong> {escape(review.rationale)}
+            <strong>{labels["quality"]}:</strong> {quality_score}/10
+            ({labels["innovation"]} {innovation_score}, {labels["rigor"]} {rigor_score}, {labels["significance"]} {significance_score})
+            <br><strong>{labels["problem"]}:</strong> {escape(review.problem)}
+            <br><strong>{labels["method"]}:</strong> {escape(review.method)}
+            <br><strong>{labels["conclusion"]}:</strong> {escape(review.conclusion)}
+            <br><strong>{labels["reviewer_note"]}:</strong> {escape(review.rationale)}
         </td>
     </tr>
 """
@@ -154,7 +196,7 @@ def get_stars(score:float):
         return '<div class="star-wrapper">'+full_star * full_star_num + half_star * half_star_num + '</div>'
 
 
-def _render_paper_html(paper: Paper) -> str:
+def _render_paper_html(paper: Paper, labels: dict[str, str]) -> str:
     rate = round(paper.score, 1) if paper.score is not None else 'Unknown'
     author_list = [author for author in paper.authors]
     num_authors = len(author_list)
@@ -168,15 +210,16 @@ def _render_paper_html(paper: Paper) -> str:
         if len(paper.affiliations) > 5:
             affiliations += ', ...'
     else:
-        affiliations = 'Unknown Affiliation'
+        affiliations = labels["affiliation_unknown"]
     return get_block_html(
         escape(paper.title),
         escape(authors),
         rate,
         escape(paper.tldr or ''),
         escape(paper.pdf_url or paper.url),
+        labels,
         escape(affiliations),
-        get_quality_review_html(paper),
+        get_quality_review_html(paper, labels),
     )
 
 
@@ -192,15 +235,24 @@ def get_group_html(label: str, summary: str | None, paper_html: str) -> str:
     )
 
 
-def render_email(groups:list[PaperGroup]) -> str:
+def render_email(groups:list[PaperGroup], language: str | None = None) -> str:
+    labels = _email_labels(language)
     if len(groups) == 0 :
-        return framework.replace('__CONTENT__', get_empty_html())
+        return (
+            framework
+            .replace('__CONTENT__', get_empty_html(labels))
+            .replace('__UNSUBSCRIBE__', labels["unsubscribe"])
+        )
 
     rendered_groups = []
     for group in groups:
-        paper_parts = [_render_paper_html(paper) for paper in group.papers]
+        paper_parts = [_render_paper_html(paper, labels) for paper in group.papers]
         paper_html = '<br>' + PAPER_SPACING.join(paper_parts) + '</br>'
         rendered_groups.append(get_group_html(group.label, group.summary, paper_html))
 
     content = '<br>' + PAPER_SPACING.join(rendered_groups) + '</br>'
-    return framework.replace('__CONTENT__', content)
+    return (
+        framework
+        .replace('__CONTENT__', content)
+        .replace('__UNSUBSCRIBE__', labels["unsubscribe"])
+    )

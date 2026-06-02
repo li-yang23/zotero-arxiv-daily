@@ -46,7 +46,11 @@ class Paper:
 
     def _generate_tldr_with_llm(self, openai_client:OpenAI,llm_params:dict) -> str:
         lang = llm_params.get('language', 'English')
-        prompt = f"Given the following information of a paper, generate a one-sentence TLDR summary in {lang}:\n\n"
+        prompt = (
+            f"Given the following information of a paper, generate a one-sentence TLDR summary in {lang}. "
+            "Do not copy the source abstract verbatim; summarize the core contribution for a researcher reading an email digest. "
+            f"If the source text is in another language, still write the TLDR in {lang}:\n\n"
+        )
         if self.title:
             prompt += f"Title:\n {self.title}\n\n"
 
@@ -82,9 +86,20 @@ class Paper:
             return tldr
         except Exception as e:
             logger.warning(f"Failed to generate tldr of {self.url}: {e}")
-            tldr = self.abstract
+            tldr = self._fallback_tldr(llm_params)
             self.tldr = tldr
             return tldr
+
+    def _fallback_tldr(self, llm_params: dict) -> str:
+        lang = str(llm_params.get('language', 'English'))
+        normalized_language = lang.strip().lower()
+        if (
+            "chinese" in normalized_language
+            or "中文" in normalized_language
+            or normalized_language.startswith("zh")
+        ):
+            return "中文总结生成失败，请打开论文链接查看原文。"
+        return self.abstract
 
     def _generate_affiliations_with_llm(self, openai_client:OpenAI,llm_params:dict) -> Optional[list[str]]:
         if self.full_text is not None:

@@ -18,6 +18,14 @@ class FakeChatClient:
         )
 
 
+class FailingChatClient:
+    def __init__(self):
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+    def create(self, *args, **kwargs):
+        raise RuntimeError("LLM unavailable")
+
+
 @pytest.fixture
 def paper() -> Paper:
     full_text = r"""
@@ -79,7 +87,18 @@ def test_tldr(config, paper: Paper):
     request = openai_client.requests[0]
     assert request["messages"][0]["role"] == "system"
     assert "summarizes scientific paper" in request["messages"][0]["content"]
+    assert "If the source text is in another language" in request["messages"][1]["content"]
     assert "GRASP" in request["messages"][1]["content"]
+
+
+def test_tldr_failure_does_not_fall_back_to_english_abstract_for_chinese(config, paper: Paper):
+    config.llm.language = "Chinese"
+    openai_client = FailingChatClient()
+
+    paper.generate_tldr(openai_client, config.llm)
+
+    assert paper.tldr == "中文总结生成失败，请打开论文链接查看原文。"
+    assert paper.abstract not in paper.tldr
 
 
 def test_affiliations(config, paper: Paper):
