@@ -6,7 +6,7 @@ from ..utils import extract_markdown_from_pdf, extract_tex_code_from_tar
 from dataclasses import dataclass
 from tempfile import TemporaryDirectory
 import feedparser
-from urllib.request import urlretrieve
+from urllib.request import urlopen, urlretrieve
 from tqdm import tqdm
 import os
 from collections import Counter
@@ -34,7 +34,7 @@ class ArxivRetriever(BaseRetriever):
     def _retrieve_raw_papers(self) -> list[ArxivResult | RssArxivResult]:
         query = '+'.join(self.config.source.arxiv.category)
         # Get the latest paper from arxiv rss feed
-        feed = feedparser.parse(f"https://rss.arxiv.org/atom/{query}")
+        feed = self._parse_arxiv_rss_feed(f"https://rss.arxiv.org/atom/{query}")
         if feed.get("bozo") and len(feed.entries) == 0:
             raise RuntimeError(f"Failed to parse arXiv RSS feed for {query}: {feed.get('bozo_exception')}")
         feed_title = feed.feed.get("title", "")
@@ -77,6 +77,20 @@ class ArxivRetriever(BaseRetriever):
         bar.close()
 
         return raw_papers
+
+    def _parse_arxiv_rss_feed(self, url: str):
+        feed = feedparser.parse(url)
+        bozo_exception = str(feed.get("bozo_exception", ""))
+        if (
+            feed.get("bozo")
+            and len(feed.entries) == 0
+            and "XML or text declaration not at start of entity" in bozo_exception
+        ):
+            logger.warning("arXiv RSS has leading bytes before XML declaration; retrying with sanitized feed")
+            with urlopen(url) as response:
+                raw_feed = response.read()
+            feed = feedparser.parse(raw_feed.lstrip(b"\xef\xbb\xbf \t\r\n"))
+        return feed
 
     def _is_daily_candidate(self, entry) -> bool:
         announce_type = entry.get("arxiv_announce_type")

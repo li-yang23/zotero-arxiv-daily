@@ -136,6 +136,46 @@ def test_arxiv_retriever_uses_rss_without_api_by_default(config, monkeypatch):
     assert all(paper.pdf_url and "/pdf/" in paper.pdf_url for paper in papers)
 
 
+def test_arxiv_retriever_sanitizes_rss_with_leading_bytes(config, monkeypatch):
+    raw_xml = open("tests/retriever/arxiv_rss_example.xml", "rb").read()
+    raw_parser = feedparser.parse
+    parsed_clean = raw_parser(raw_xml)
+    failed_feed = feedparser.FeedParserDict(
+        bozo=True,
+        bozo_exception=RuntimeError("XML or text declaration not at start of entity"),
+        entries=[],
+        feed=feedparser.FeedParserDict(title=None),
+    )
+    parse_calls = []
+
+    def mock_feedparser_parse(value):
+        parse_calls.append(value)
+        if isinstance(value, str):
+            return failed_feed
+        return raw_parser(value)
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return b"\n \t" + raw_xml
+
+    monkeypatch.setattr(feedparser, "parse", mock_feedparser_parse)
+    monkeypatch.setattr(arxiv_retriever_module, "urlopen", lambda _url: FakeResponse())
+    monkeypatch.setattr(retriever_base_module, "ProcessPoolExecutor", InlineExecutor)
+
+    retriever = ArxivRetriever(config)
+    papers = retriever.retrieve_papers()
+
+    assert len(papers) == len(daily_rss_entries(parsed_clean.entries))
+    assert isinstance(parse_calls[1], bytes)
+    assert parse_calls[1].startswith(b"<?xml")
+
+
 def test_arxiv_retriever_raises_when_rss_parse_fails_empty(config, monkeypatch):
     failed_feed = feedparser.FeedParserDict(
         bozo=True,
