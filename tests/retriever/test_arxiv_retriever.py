@@ -29,6 +29,7 @@ def daily_rss_entries(entries):
 
 def test_arxiv_retriever(config, monkeypatch):
 
+    config.source.arxiv.api_enrich_metadata = True
     parsed_result = feedparser.parse("tests/retriever/arxiv_rss_example.xml")
     raw_parser = feedparser.parse
     def mock_feedparser_parse(url):
@@ -79,6 +80,7 @@ def test_arxiv_retriever(config, monkeypatch):
 
 
 def test_arxiv_retriever_falls_back_to_rss_when_api_is_rate_limited(config, monkeypatch):
+    config.source.arxiv.api_enrich_metadata = True
     parsed_result = feedparser.parse("tests/retriever/arxiv_rss_example.xml")
     raw_parser = feedparser.parse
 
@@ -106,6 +108,32 @@ def test_arxiv_retriever_falls_back_to_rss_when_api_is_rate_limited(config, monk
     assert {paper.title for paper in papers} == {entry.title for entry in parsed_results}
     assert all(paper.source == "arxiv" for paper in papers)
     assert all(paper.abstract for paper in papers)
+
+
+def test_arxiv_retriever_uses_rss_without_api_by_default(config, monkeypatch):
+    parsed_result = feedparser.parse("tests/retriever/arxiv_rss_example.xml")
+    raw_parser = feedparser.parse
+
+    def mock_feedparser_parse(url):
+        if url == f"https://rss.arxiv.org/atom/{'+'.join(config.source.arxiv.category)}":
+            return parsed_result
+        return raw_parser(url)
+
+    class UnexpectedArxivClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("arXiv API should not be called when API enrichment is disabled")
+
+    monkeypatch.setattr(feedparser, "parse", mock_feedparser_parse)
+    monkeypatch.setattr(arxiv_retriever_module.arxiv, "Client", UnexpectedArxivClient)
+    monkeypatch.setattr(retriever_base_module, "ProcessPoolExecutor", InlineExecutor)
+
+    retriever = ArxivRetriever(config)
+    papers = retriever.retrieve_papers()
+    parsed_results = daily_rss_entries(parsed_result.entries)
+
+    assert len(papers) == len(parsed_results)
+    assert {paper.title for paper in papers} == {entry.title for entry in parsed_results}
+    assert all(paper.pdf_url and "/pdf/" in paper.pdf_url for paper in papers)
 
 
 def test_arxiv_retriever_raises_when_rss_parse_fails_empty(config, monkeypatch):

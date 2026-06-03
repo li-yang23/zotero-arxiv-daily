@@ -114,6 +114,10 @@ zotero:
 source:
   arxiv:
     category: null # The categories of target arxiv papers. Find the abbr of your research area from [here](https://arxiv.org/category_taxonomy). Example: ["cs.AI","cs.CV","cs.LG","cs.CL"]
+    api_enrich_metadata: false # Whether to call export.arxiv.org/api/query after RSS retrieval. Keep false for stable GitHub Actions runs.
+    api_batch_size: 5 # Number of paper IDs to request from the arXiv API at once. Smaller values reduce HTTP 429 risk. Example: 5
+    api_delay_seconds: 15 # Delay between arXiv API retries in seconds. Larger values reduce HTTP 429 risk. Example: 15
+    api_num_retries: 3 # Number of retries for transient arXiv API failures. Example: 3
   biorxiv:
     category: null # The categories of target biorxiv papers. Find categories from [here](https://www.biorxiv.org/). Example: ["biochemistry","animal behavior and cognition"]
   medrxiv:

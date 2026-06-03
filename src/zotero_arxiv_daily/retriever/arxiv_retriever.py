@@ -32,10 +32,6 @@ class ArxivRetriever(BaseRetriever):
             raise ValueError("category must be specified for arxiv.")
 
     def _retrieve_raw_papers(self) -> list[ArxivResult | RssArxivResult]:
-        client = arxiv.Client(
-            num_retries=int(OmegaConf.select(self.config, "source.arxiv.api_num_retries", default=3)),
-            delay_seconds=float(OmegaConf.select(self.config, "source.arxiv.api_delay_seconds", default=15)),
-        )
         query = '+'.join(self.config.source.arxiv.category)
         # Get the latest paper from arxiv rss feed
         feed = feedparser.parse(f"https://rss.arxiv.org/atom/{query}")
@@ -57,7 +53,15 @@ class ArxivRetriever(BaseRetriever):
         if self.config.executor.debug:
             all_paper_ids = all_paper_ids[:10]
 
+        if not OmegaConf.select(self.config, "source.arxiv.api_enrich_metadata", default=False):
+            logger.info("Using arXiv RSS metadata without API enrichment")
+            return self._rss_entries_to_raw_papers(rss_entries, all_paper_ids)
+
         # Get full information of each paper from arxiv api
+        client = arxiv.Client(
+            num_retries=int(OmegaConf.select(self.config, "source.arxiv.api_num_retries", default=3)),
+            delay_seconds=float(OmegaConf.select(self.config, "source.arxiv.api_delay_seconds", default=15)),
+        )
         bar = tqdm(total=len(all_paper_ids))
         batch_size = max(1, int(OmegaConf.select(self.config, "source.arxiv.api_batch_size", default=5)))
         for i in range(0, len(all_paper_ids), batch_size):
