@@ -111,6 +111,7 @@ def test_arxiv_retriever_falls_back_to_rss_when_api_is_rate_limited(config, monk
 
 
 def test_arxiv_retriever_uses_rss_without_api_by_default(config, monkeypatch):
+    config.source.arxiv.api_enrich_metadata = False
     parsed_result = feedparser.parse("tests/retriever/arxiv_rss_example.xml")
     raw_parser = feedparser.parse
 
@@ -137,6 +138,7 @@ def test_arxiv_retriever_uses_rss_without_api_by_default(config, monkeypatch):
 
 
 def test_arxiv_retriever_sanitizes_rss_with_leading_bytes(config, monkeypatch):
+    config.source.arxiv.api_enrich_metadata = False
     raw_xml = open("tests/retriever/arxiv_rss_example.xml", "rb").read()
     raw_parser = feedparser.parse
     parsed_clean = raw_parser(raw_xml)
