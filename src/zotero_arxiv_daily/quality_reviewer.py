@@ -7,6 +7,7 @@ from omegaconf import DictConfig, OmegaConf
 from openai import OpenAI, OpenAIError
 
 from .protocol import Paper, QualityReview, truncate_text_by_tokens
+from .llm_utils import iter_generation_kwargs
 
 
 class QualityReviewer:
@@ -35,20 +36,24 @@ class QualityReviewer:
     def review_paper(self, paper: Paper) -> QualityReview | None:
         try:
             payload = self._build_payload(paper)
-            response = self.openai_client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": self._system_prompt()},
-                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-                ],
-                response_format={"type": "json_object"},
-                **self.llm_params.get("generation_kwargs", {}),
-            )
-            content = response.choices[0].message.content
-            return self._parse_review(content)
-        except (OpenAIError, httpx.HTTPError) as exc:
-            logger.warning(f"Quality review request failed for {paper.url}: {exc}")
-        except (ValueError, TypeError, KeyError, IndexError, json.JSONDecodeError) as exc:
-            logger.warning(f"Invalid quality review output for {paper.url}: {exc}")
+            for generation_kwargs in iter_generation_kwargs(self.llm_params):
+                try:
+                    response = self.openai_client.chat.completions.create(
+                        messages=[
+                            {"role": "system", "content": self._system_prompt()},
+                            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+                        ],
+                        response_format={"type": "json_object"},
+                        **generation_kwargs,
+                    )
+                    content = response.choices[0].message.content
+                    return self._parse_review(content)
+                except (OpenAIError, httpx.HTTPError) as exc:
+                    logger.warning(f"Quality review request failed for {paper.url} with model {generation_kwargs.get('model')}: {exc}")
+                except (ValueError, TypeError, KeyError, IndexError, json.JSONDecodeError) as exc:
+                    logger.warning(f"Invalid quality review output for {paper.url} with model {generation_kwargs.get('model')}: {exc}")
+        except Exception as exc:
+            logger.warning(f"Quality review failed for {paper.url}: {exc}")
         return None
 
     def _build_payload(self, paper: Paper) -> dict[str, str | None]:

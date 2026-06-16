@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import httpx
+from omegaconf import OmegaConf
 
 from zotero_arxiv_daily.protocol import Paper
 from zotero_arxiv_daily.quality_reviewer import QualityReviewer
@@ -73,6 +74,20 @@ def test_quality_reviewer_excludes_invalid_review(config):
 
     assert selected == []
     assert papers[0].quality_review is None
+
+
+def test_quality_reviewer_falls_back_to_next_model(config):
+    local_config = OmegaConf.create(OmegaConf.to_container(config, resolve=False))
+    local_config.llm.generation_kwargs.model = ["bad-model", "good-model"]
+    client = FakeChatClient(['{"problem": "missing required fields"}', review_json(8.0)])
+    reviewer = QualityReviewer(client, local_config)
+    paper = make_paper("fallback")
+
+    review = reviewer.review_paper(paper)
+
+    assert review is not None
+    assert review.overall_score == 8.0
+    assert [request["model"] for request in client.requests] == ["bad-model", "good-model"]
 
 
 def test_quality_reviewer_handles_httpx_timeout(config):

@@ -141,6 +141,18 @@ def test_render_email_renders_quality_review(papers: list[Paper]):
     assert "<strong>Conclusion:</strong> It improves robustness with fewer trainable parameters." in email_content
 
 
+def test_render_email_renders_expandable_detailed_summary(papers: list[Paper]):
+    papers[0].detailed_summary = "Full analysis <with evidence> & limitations."
+    groups = [PaperGroup(label="Reviewed", summary=None, papers=[papers[0]])]
+
+    email_content = render_email(groups)
+
+    assert "<details>" in email_content
+    assert "Show full analysis" in email_content
+    assert "<strong>Full Analysis:</strong> Full analysis &lt;with evidence&gt; &amp; limitations." in email_content
+    assert "Full analysis <with evidence> & limitations." not in email_content
+
+
 def test_render_email_uses_chinese_labels(papers: list[Paper]):
     papers[0].quality_review = QualityReview(
         problem="论文研究鲁棒微调问题。",
@@ -152,11 +164,14 @@ def test_render_email_uses_chinese_labels(papers: list[Paper]):
         overall_score=7.8,
         rationale="实验扎实，贡献清楚。",
     )
+    papers[0].detailed_summary = "完整回答十个问题。"
     groups = [PaperGroup(label="视觉理解", summary="这些论文研究视觉理解。", papers=[papers[0]])]
 
     email_content = render_email(groups, language="Chinese")
 
     assert "<strong>论文总结:</strong>" in email_content
+    assert "展开完整分析" in email_content
+    assert "<strong>完整分析:</strong> 完整回答十个问题。" in email_content
     assert "<strong>质量评分:</strong> 7.8/10" in email_content
     assert "创新性 7.5, 严谨性 8.0, 重要性 7.0" in email_content
     assert "<strong>问题:</strong> 论文研究鲁棒微调问题。" in email_content

@@ -15,7 +15,11 @@ llm:
     key: ${oc.env:OPENAI_API_KEY}
     base_url: ${oc.env:OPENAI_API_BASE}
   generation_kwargs:
-    model: gpt-4o-mini
+    model:
+      - zai-org/GLM-4.5V
+      - deepseek-ai/DeepSeek-V4-Flash
+      - Pro/deepseek-ai/DeepSeek-V3.2
+      - Qwen/Qwen3.5-397B-A17B
 
 source:
   arxiv:

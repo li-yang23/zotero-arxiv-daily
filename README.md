@@ -91,7 +91,11 @@ llm:
     key: ${oc.env:OPENAI_API_KEY}
     base_url: ${oc.env:OPENAI_API_BASE}
   generation_kwargs:
-    model: gpt-4o-mini
+    model:
+      - zai-org/GLM-4.5V
+      - deepseek-ai/DeepSeek-V4-Flash
+      - Pro/deepseek-ai/DeepSeek-V3.2
+      - Qwen/Qwen3.5-397B-A17B
 
 source:
   arxiv:
@@ -137,7 +141,7 @@ llm:
   generation_kwargs:
   # Arguments for the LLM API. See [here](https://platform.openai.com/docs/api-reference/chat/create) for more details.
     max_tokens: 16384
-    model: ???
+    model: ??? # A model name or an ordered list of model names. If a list is provided, the first successful model is used.
   language: Chinese # Preferred language for generated summaries and reviews. Example: Chinese
 
 reranker:

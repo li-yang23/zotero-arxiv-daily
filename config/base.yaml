@@ -31,7 +31,7 @@ llm:
   generation_kwargs:
   # Arguments for the LLM API. See [here](https://platform.openai.com/docs/api-reference/chat/create) for more details.
     max_tokens: 16384
-    model: ???
+    model: ??? # A model name or an ordered list of model names. If a list is provided, the first successful model is used.
   language: Chinese # Preferred language for generated summaries and reviews. Example: Chinese
 
 reranker:

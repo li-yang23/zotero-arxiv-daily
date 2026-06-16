@@ -8,6 +8,7 @@ from loguru import logger
 from openai import OpenAI, OpenAIError
 
 from .protocol import Paper
+from .llm_utils import iter_generation_kwargs
 
 
 @dataclass
@@ -48,27 +49,32 @@ class TopicClusterer:
         ]
 
         for attempt, system_prompt in enumerate(system_prompts):
-            try:
-                response = self.openai_client.chat.completions.create(
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-                    ],
-                    response_format={"type": "json_object"},
-                    **self.llm_params.get("generation_kwargs", {}),
-                )
-                content = response.choices[0].message.content
-                parsed_groups = self._parse_groups(content)
-                self._validate_groups(parsed_groups, len(papers))
-                return self._materialize_groups(parsed_groups, papers)
-            except (OpenAIError, httpx.HTTPError) as exc:
-                logger.warning(f"Topic clustering request failed without retry: {exc}")
-                return None
-            except (ValueError, TypeError, KeyError, IndexError) as exc:
-                if attempt == 0:
-                    logger.warning(f"Invalid topic clustering output; retrying once with stricter instructions: {exc}")
-                    continue
-                logger.warning(f"Topic clustering failed after retry: {exc}")
+            invalid_output_seen = False
+            for generation_kwargs in iter_generation_kwargs(self.llm_params):
+                try:
+                    response = self.openai_client.chat.completions.create(
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+                        ],
+                        response_format={"type": "json_object"},
+                        **generation_kwargs,
+                    )
+                    content = response.choices[0].message.content
+                    parsed_groups = self._parse_groups(content)
+                    self._validate_groups(parsed_groups, len(papers))
+                    return self._materialize_groups(parsed_groups, papers)
+                except (OpenAIError, httpx.HTTPError) as exc:
+                    logger.warning(f"Topic clustering request failed with model {generation_kwargs.get('model')}: {exc}")
+                except (ValueError, TypeError, KeyError, IndexError) as exc:
+                    invalid_output_seen = True
+                    logger.warning(f"Invalid topic clustering output with model {generation_kwargs.get('model')}: {exc}")
+            if attempt == 0:
+                if not invalid_output_seen:
+                    return None
+                logger.warning("Topic clustering failed for all models; retrying once with stricter instructions")
+                continue
+            logger.warning("Topic clustering failed after trying all models")
         return None
 
     def _build_prompt_payload(self, papers: list[Paper]) -> dict[str, Any]:

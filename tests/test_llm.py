@@ -6,15 +6,20 @@ from zotero_arxiv_daily.protocol import Paper
 
 
 class FakeChatClient:
-    def __init__(self, response: str):
-        self.response = response
+    def __init__(self, response: str | list[str | Exception]):
+        if isinstance(response, (str, Exception)):
+            response = [response]
+        self.responses = list(response)
         self.requests = []
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
 
     def create(self, *args, **kwargs):
         self.requests.append(kwargs)
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
         return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=self.response))]
+            choices=[SimpleNamespace(message=SimpleNamespace(content=response))]
         )
 
 
@@ -79,16 +84,41 @@ emerging energy-efficient AI hardware accelerators based on novel non-volatile m
     )
 
 def test_tldr(config, paper: Paper):
-    openai_client = FakeChatClient("A compact summary of the paper.")
+    openai_client = FakeChatClient(
+        '{"concise_summary": "A compact five-question digest.", '
+        '"detailed_summary": "A full ten-question analysis."}'
+    )
 
     paper.generate_tldr(openai_client, config.llm)
 
-    assert paper.tldr == "A compact summary of the paper."
+    assert paper.tldr == "A compact five-question digest."
+    assert paper.detailed_summary == "A full ten-question analysis."
     request = openai_client.requests[0]
     assert request["messages"][0]["role"] == "system"
-    assert "summarizes scientific paper" in request["messages"][0]["content"]
-    assert "If the source text is in another language" in request["messages"][1]["content"]
+    assert request["response_format"] == {"type": "json_object"}
+    assert "high-density paper digests" in request["messages"][0]["content"]
+    assert "concise_summary" in request["messages"][1]["content"]
+    assert "whether the problem still needs further research" in request["messages"][1]["content"]
     assert "GRASP" in request["messages"][1]["content"]
+
+
+def test_tldr_falls_back_to_next_model_when_output_is_invalid(config, paper: Paper):
+    llm_params = {
+        "language": config.llm.language,
+        "generation_kwargs": {"model": ["bad-model", "good-model"]},
+    }
+    openai_client = FakeChatClient(
+        [
+            '{"concise_summary": "missing detailed summary"}',
+            '{"concise_summary": "Recovered concise digest.", "detailed_summary": "Recovered full analysis."}',
+        ]
+    )
+
+    paper.generate_tldr(openai_client, llm_params)
+
+    assert paper.tldr == "Recovered concise digest."
+    assert paper.detailed_summary == "Recovered full analysis."
+    assert [request["model"] for request in openai_client.requests] == ["bad-model", "good-model"]
 
 
 def test_tldr_failure_does_not_fall_back_to_english_abstract_for_chinese(config, paper: Paper):
