@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from pyzotero.errors import HTTPError as ZoteroHTTPError
 
 import zotero_arxiv_daily.executor as executor_module
 from zotero_arxiv_daily.protocol import CorpusPaper, Paper, QualityReview
@@ -159,6 +160,50 @@ def make_forwarding_topic_clusterer(observed: dict):
             return self.delegate.cluster_papers(papers)
 
     return ForwardingTopicClusterer
+
+
+def make_minimal_executor(monkeypatch: pytest.MonkeyPatch, config):
+    monkeypatch.setattr(executor_module, "OpenAI", DummyOpenAI)
+    monkeypatch.setattr(executor_module, "get_retriever_cls", lambda _source: lambda _config: None)
+    monkeypatch.setattr(executor_module, "get_reranker_cls", lambda _name: lambda _config: None)
+    return executor_module.Executor(config)
+
+
+def test_zotero_retry_succeeds_after_transient_error(config, monkeypatch: pytest.MonkeyPatch):
+    test_config = make_executor_config(config, send_empty=False)
+    test_config.zotero.api_max_retries = 2
+    test_config.zotero.api_retry_delay_seconds = 0
+    sleep_calls = []
+    attempts = []
+    executor = make_minimal_executor(monkeypatch, test_config)
+    monkeypatch.setattr(executor_module, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    def flaky_operation():
+        attempts.append("call")
+        if len(attempts) == 1:
+            raise ZoteroHTTPError("Code: 502")
+        return ["ok"]
+
+    assert executor._call_zotero_with_retries(flaky_operation, "items") == ["ok"]
+    assert len(attempts) == 2
+    assert sleep_calls == [0]
+
+
+def test_zotero_retry_does_not_retry_non_transient_error(config, monkeypatch: pytest.MonkeyPatch):
+    test_config = make_executor_config(config, send_empty=False)
+    test_config.zotero.api_max_retries = 2
+    test_config.zotero.api_retry_delay_seconds = 0
+    attempts = []
+    executor = make_minimal_executor(monkeypatch, test_config)
+    monkeypatch.setattr(executor_module, "sleep", lambda _seconds: None)
+
+    def unauthorized_operation():
+        attempts.append("call")
+        raise ZoteroHTTPError("Code: 403")
+
+    with pytest.raises(ZoteroHTTPError):
+        executor._call_zotero_with_retries(unauthorized_operation, "items")
+    assert len(attempts) == 1
 
 
 def test_executor_initializes_topic_clusterer_with_openai_client_and_llm_config(

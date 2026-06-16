@@ -1,12 +1,14 @@
 from loguru import logger
 from omegaconf import OmegaConf
 from pyzotero import zotero
+from pyzotero.errors import HTTPError as ZoteroHTTPError
 from omegaconf import DictConfig
 from .utils import glob_match
 from .retriever import get_retriever_cls
 from .protocol import CorpusPaper, Paper
 import random
 from datetime import datetime
+from time import sleep
 from .reranker import get_reranker_cls
 from .construct_email import render_email
 from .utils import send_email
@@ -35,9 +37,15 @@ class Executor:
     def fetch_zotero_corpus(self) -> list[CorpusPaper]:
         logger.info("Fetching zotero corpus")
         zot = zotero.Zotero(self.config.zotero.user_id, 'user', self.config.zotero.api_key)
-        collections = zot.everything(zot.collections())
+        collections = self._call_zotero_with_retries(
+            lambda: zot.everything(zot.collections()),
+            "collections",
+        )
         collections = {c['key']: c for c in collections}
-        corpus = zot.everything(zot.items(itemType='conferencePaper || journalArticle || preprint'))
+        corpus = self._call_zotero_with_retries(
+            lambda: zot.everything(zot.items(itemType='conferencePaper || journalArticle || preprint')),
+            "items",
+        )
         corpus = [c for c in corpus if c['data']['abstractNote'] != '']
 
         def get_collection_path(col_key: str) -> str:
@@ -56,6 +64,27 @@ class Executor:
             added_date=datetime.strptime(c['data']['dateAdded'], '%Y-%m-%dT%H:%M:%SZ'),
             paths=c['paths']
         ) for c in corpus]
+
+    def _call_zotero_with_retries(self, operation, label: str):
+        max_retries = int(OmegaConf.select(self.config, "zotero.api_max_retries", default=5))
+        retry_delay = float(OmegaConf.select(self.config, "zotero.api_retry_delay_seconds", default=30))
+        for attempt in range(max_retries + 1):
+            try:
+                return operation()
+            except ZoteroHTTPError as exc:
+                if not self._is_transient_zotero_error(exc) or attempt >= max_retries:
+                    raise
+                logger.warning(
+                    f"Transient Zotero API error while fetching {label}; "
+                    f"retrying in {retry_delay:g}s ({attempt + 1}/{max_retries}): {exc}"
+                )
+                sleep(retry_delay)
+        raise RuntimeError(f"Failed to fetch Zotero {label}")
+
+    def _is_transient_zotero_error(self, exc: ZoteroHTTPError) -> bool:
+        message = str(exc)
+        transient_codes = ("429", "500", "502", "503", "504")
+        return any(f"Code: {code}" in message for code in transient_codes)
 
     def filter_corpus(self, corpus: list[CorpusPaper]) -> list[CorpusPaper]:
         if not self.config.zotero.include_path:

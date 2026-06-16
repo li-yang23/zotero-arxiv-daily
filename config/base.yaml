@@ -2,6 +2,8 @@ zotero:
   user_id: ??? # User ID of your Zotero account.
   api_key: ??? # An Zotero API key with read access.
   include_path: null # A glob pattern marking the Zotero collections that should be included. Example: "2026/survey/**"
+  api_max_retries: 5 # Number of retries for transient Zotero API 429/5xx failures. Example: 5
+  api_retry_delay_seconds: 30 # Delay between Zotero API retries in seconds. Example: 30
 
 source:
   arxiv:
