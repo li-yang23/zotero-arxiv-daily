@@ -116,6 +116,10 @@ class ArxivRetriever(BaseRetriever):
 
     def _parse_rss_authors(self, entry) -> list[str]:
         creators = entry.get("dc_creator") or entry.get("creator") or ""
+        if not creators:
+            creators = entry.get("author") or ""
+        if not creators and entry.get("authors"):
+            creators = ", ".join(author.get("name", "") for author in entry.get("authors", []))
         return [creator.strip() for creator in creators.split(",") if creator.strip()]
 
     def _parse_rss_summary(self, summary: str) -> str:

@@ -206,6 +206,55 @@ def test_zotero_retry_does_not_retry_non_transient_error(config, monkeypatch: py
     assert len(attempts) == 1
 
 
+def test_executor_extracts_selected_paper_full_text(config, monkeypatch: pytest.MonkeyPatch):
+    test_config = make_executor_config(config, send_empty=False)
+    test_config.executor.extract_selected_full_text = True
+    executor = make_minimal_executor(monkeypatch, test_config)
+    paper = Paper(
+        source="arxiv",
+        title="Selected paper",
+        authors=["Author"],
+        abstract="Abstract",
+        url="https://example.com/abs",
+        pdf_url="https://example.com/pdf",
+    )
+    calls = {}
+
+    def fake_urlretrieve(url, path):
+        calls["download"] = (url, path)
+
+    monkeypatch.setattr(executor_module, "urlretrieve", fake_urlretrieve)
+    monkeypatch.setattr(executor_module, "extract_markdown_from_pdf", lambda path: f"full text from {path}")
+
+    executor._ensure_selected_paper_full_text(paper)
+
+    assert calls["download"][0] == "https://example.com/pdf"
+    assert paper.full_text.startswith("full text from")
+
+
+def test_executor_skips_selected_full_text_when_disabled(config, monkeypatch: pytest.MonkeyPatch):
+    test_config = make_executor_config(config, send_empty=False)
+    test_config.executor.extract_selected_full_text = False
+    executor = make_minimal_executor(monkeypatch, test_config)
+    paper = Paper(
+        source="arxiv",
+        title="Selected paper",
+        authors=["Author"],
+        abstract="Abstract",
+        url="https://example.com/abs",
+        pdf_url="https://example.com/pdf",
+    )
+    monkeypatch.setattr(
+        executor_module,
+        "urlretrieve",
+        lambda _url, _path: (_ for _ in ()).throw(AssertionError("should not download")),
+    )
+
+    executor._ensure_selected_paper_full_text(paper)
+
+    assert paper.full_text is None
+
+
 def test_executor_initializes_topic_clusterer_with_openai_client_and_llm_config(
     config,
     monkeypatch: pytest.MonkeyPatch,

@@ -3,12 +3,15 @@ from omegaconf import OmegaConf
 from pyzotero import zotero
 from pyzotero.errors import HTTPError as ZoteroHTTPError
 from omegaconf import DictConfig
-from .utils import glob_match
+from .utils import extract_markdown_from_pdf, glob_match
 from .retriever import get_retriever_cls
 from .protocol import CorpusPaper, Paper
 import random
 from datetime import datetime
+import os
+from tempfile import TemporaryDirectory
 from time import sleep
+from urllib.request import urlretrieve
 from .reranker import get_reranker_cls
 from .construct_email import render_email
 from .utils import send_email
@@ -123,6 +126,7 @@ class Executor:
             reranked_papers = self._select_papers_for_email(reranked_papers)
             logger.info("Generating TLDR and affiliations...")
             for p in tqdm(reranked_papers):
+                self._ensure_selected_paper_full_text(p)
                 p.generate_tldr(self.openai_client, self.config.llm)
                 p.generate_affiliations(self.openai_client, self.config.llm)
 
@@ -170,3 +174,16 @@ class Executor:
             )
             return reranked_papers[:max_paper_num]
         return selected[:max_paper_num]
+
+    def _ensure_selected_paper_full_text(self, paper: Paper) -> None:
+        if paper.full_text or not paper.pdf_url:
+            return
+        if not OmegaConf.select(self.config, "executor.extract_selected_full_text", default=True):
+            return
+        try:
+            with TemporaryDirectory() as temp_dir:
+                path = os.path.join(temp_dir, "paper.pdf")
+                urlretrieve(paper.pdf_url, path)
+                paper.full_text = extract_markdown_from_pdf(path)
+        except Exception as exc:
+            logger.warning(f"Failed to extract selected paper full text for {paper.url}: {exc}")

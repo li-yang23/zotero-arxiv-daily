@@ -168,6 +168,7 @@ executor:
   send_empty: false # Whether to send an empty email even if no new papers today. Example: true
   max_workers: 4 # Concurrent workers for processing papers. Example: 4
   max_paper_num: 25 # The maximum number of the papers presented in the email. Example: 25
+  extract_selected_full_text: true # Whether to download selected paper PDFs before TLDR and affiliation extraction. Example: true
   source: ??? # The sources of papers to retrieve. Example: ['arxiv','biorxiv','medrxiv']
   reranker: local # The reranker to use. Example: 'local' or 'api'
 ```

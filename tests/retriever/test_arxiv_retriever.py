@@ -135,6 +135,8 @@ def test_arxiv_retriever_uses_rss_without_api_by_default(config, monkeypatch):
     assert len(papers) == len(parsed_results)
     assert {paper.title for paper in papers} == {entry.title for entry in parsed_results}
     assert all(paper.pdf_url and "/pdf/" in paper.pdf_url for paper in papers)
+    assert any(paper.authors for paper in papers)
+    assert papers[0].authors == ["Chunhua Liu", "Kabir Manandhar Shrestha", "Sukai Huang"]
 
 
 def test_arxiv_retriever_sanitizes_rss_with_leading_bytes(config, monkeypatch):
