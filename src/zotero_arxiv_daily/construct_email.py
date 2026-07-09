@@ -7,7 +7,7 @@ from .topic_clusterer import PaperGroup
 
 GROUP_WRAPPER_STYLE = "margin: 0 0 32px 0;"
 GROUP_HEADING_STYLE = "font-family: Arial, sans-serif; font-size: 24px; font-weight: bold; color: #222; margin: 0 0 8px 0;"
-GROUP_SUMMARY_STYLE = "font-family: Arial, sans-serif; font-size: 14px; color: #555; margin: 0 0 16px 0; line-height: 1.5;"
+GROUP_SUMMARY_STYLE = "font-family: Arial, sans-serif; font-size: 16px; color: #555; margin: 0 0 16px 0; line-height: 1.55;"
 PAPER_SPACING = '<br></br><br>'
 
 
@@ -34,6 +34,7 @@ def _email_labels(language: str | None) -> dict[str, str]:
             "method": "方法",
             "conclusion": "结论",
             "reviewer_note": "评审备注",
+            "api_balance": "API 余额",
         }
     return {
         "empty": "No Papers Today. Take a Rest!",
@@ -51,6 +52,7 @@ def _email_labels(language: str | None) -> dict[str, str]:
         "method": "Method",
         "conclusion": "Conclusion",
         "reviewer_note": "Reviewer Note",
+        "api_balance": "API Balance",
     }
 
 
@@ -86,7 +88,10 @@ framework = """
 </div>
 
 <br><br>
-<div>
+<div style="font-family: Arial, sans-serif; font-size: 16px; line-height: 1.5; color: #555;">
+__API_BALANCE__
+</div>
+<div style="font-family: Arial, sans-serif; font-size: 16px; line-height: 1.5; color: #555;">
 __UNSUBSCRIBE__
 </div>
 
@@ -125,19 +130,19 @@ def get_block_html(
         </td>
     </tr>
     <tr>
-        <td style="font-size: 14px; color: #666; padding: 8px 0;">
+        <td style="font-size: 16px; color: #666; padding: 8px 0; line-height: 1.5;">
             {authors}
             <br>
             <i>{affiliations}</i>
         </td>
     </tr>
     <tr>
-        <td style="font-size: 14px; color: #333; padding: 8px 0;">
+        <td style="font-size: 16px; color: #333; padding: 8px 0; line-height: 1.5;">
             <strong>{relevance_label}:</strong> {rate}
         </td>
     </tr>
     <tr>
-        <td style="font-size: 14px; color: #333; padding: 8px 0;">
+        <td style="font-size: 16px; color: #333; padding: 8px 0; line-height: 1.5;">
             <strong>{tldr_label}:</strong> {tldr}
         </td>
     </tr>
@@ -146,7 +151,7 @@ def get_block_html(
 
     <tr>
         <td style="padding: 8px 0;">
-            <a href="{pdf_url}" style="display: inline-block; text-decoration: none; font-size: 14px; font-weight: bold; color: #fff; background-color: #d9534f; padding: 8px 16px; border-radius: 4px;">PDF</a>
+            <a href="{pdf_url}" style="display: inline-block; text-decoration: none; font-size: 16px; font-weight: bold; color: #fff; background-color: #d9534f; padding: 8px 16px; border-radius: 4px;">PDF</a>
         </td>
     </tr>
 </table>
@@ -170,7 +175,7 @@ def get_detailed_summary_html(paper: Paper, labels: dict[str, str]) -> str:
         return ""
     return f"""
     <tr>
-        <td style="font-size: 14px; color: #333; padding: 8px 0;">
+        <td style="font-size: 16px; color: #333; padding: 8px 0; line-height: 1.5;">
             <details>
                 <summary style="cursor: pointer; font-weight: bold; color: #2b5c8a;">{labels["show_full_summary"]}</summary>
                 <div style="margin-top: 8px; line-height: 1.55; white-space: pre-wrap;">
@@ -192,7 +197,7 @@ def get_quality_review_html(paper: Paper, labels: dict[str, str]) -> str:
     significance_score = round(review.significance_score, 1)
     return f"""
     <tr>
-        <td style="font-size: 14px; color: #333; padding: 8px 0;">
+        <td style="font-size: 16px; color: #333; padding: 8px 0; line-height: 1.5;">
             <strong>{labels["quality"]}:</strong> {quality_score}/10
             ({labels["innovation"]} {innovation_score}, {labels["rigor"]} {rigor_score}, {labels["significance"]} {significance_score})
             <br><strong>{labels["problem"]}:</strong> {escape(review.problem)}
@@ -260,12 +265,20 @@ def get_group_html(label: str, summary: str | None, paper_html: str) -> str:
     )
 
 
-def render_email(groups:list[PaperGroup], language: str | None = None) -> str:
+def _render_api_balance(api_balance: str | None, labels: dict[str, str]) -> str:
+    if not api_balance:
+        return ""
+    return f'<div><strong>{labels["api_balance"]}:</strong> {escape(api_balance)}</div>'
+
+
+def render_email(groups:list[PaperGroup], language: str | None = None, api_balance: str | None = None) -> str:
     labels = _email_labels(language)
+    api_balance_html = _render_api_balance(api_balance, labels)
     if len(groups) == 0 :
         return (
             framework
             .replace('__CONTENT__', get_empty_html(labels))
+            .replace('__API_BALANCE__', api_balance_html)
             .replace('__UNSUBSCRIBE__', labels["unsubscribe"])
         )
 
@@ -279,5 +292,6 @@ def render_email(groups:list[PaperGroup], language: str | None = None) -> str:
     return (
         framework
         .replace('__CONTENT__', content)
+        .replace('__API_BALANCE__', api_balance_html)
         .replace('__UNSUBSCRIBE__', labels["unsubscribe"])
     )

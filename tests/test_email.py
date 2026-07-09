@@ -260,6 +260,23 @@ def test_render_email_uses_chinese_empty_email_copy():
     assert "今天没有新论文，可以休息一下。" in email_content
 
 
+def test_render_email_renders_api_balance_footer(papers: list[Paper]):
+    groups = [PaperGroup(label="Relevant papers today", summary=None, papers=[papers[0]])]
+
+    email_content = render_email(groups, language="Chinese", api_balance="12.34 USD")
+
+    assert "<strong>API 余额:</strong> 12.34 USD" in email_content
+    assert "font-size: 16px" in email_content
+
+
+def test_render_email_omits_api_balance_footer_when_unavailable(papers: list[Paper]):
+    groups = [PaperGroup(label="Relevant papers today", summary=None, papers=[papers[0]])]
+
+    email_content = render_email(groups, api_balance=None)
+
+    assert "<strong>API Balance:</strong>" not in email_content
+
+
 def test_send_email(config, papers: list[Paper], monkeypatch: pytest.MonkeyPatch):
     groups = [PaperGroup(label="Vision", summary="Papers about visual understanding.", papers=papers[:2])]
     html = render_email(groups)
