@@ -14,7 +14,7 @@ from time import sleep
 from urllib.request import urlretrieve
 from .reranker import get_reranker_cls
 from .construct_email import render_email
-from .utils import send_email
+from .utils import fetch_api_balance, send_email
 from .topic_clusterer import TopicClusterer
 from .quality_reviewer import QualityReviewer
 from openai import OpenAI
@@ -140,7 +140,8 @@ class Executor:
             grouped_papers = self.topic_clusterer.cluster_papers(reranked_papers)
 
         logger.info("Sending email...")
-        email_content = render_email(grouped_papers, self.config.llm.language)
+        api_balance = fetch_api_balance(self.config)
+        email_content = render_email(grouped_papers, self.config.llm.language, api_balance=api_balance)
         send_email(self.config, email_content)
         logger.info("Email sent successfully")
 

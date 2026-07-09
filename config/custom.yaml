@@ -9,6 +9,11 @@ email:
   smtp_server: smtp.qq.com
   smtp_port: 465
   sender_password: ${oc.env:SENDER_PASSWORD}
+  api_balance:
+    enabled: ${oc.env:API_BALANCE_ENABLED,false}
+    endpoint: ${oc.env:API_BALANCE_ENDPOINT,null}
+    json_path: ${oc.env:API_BALANCE_JSON_PATH,null}
+    currency: ${oc.env:API_BALANCE_CURRENCY,""}
 
 llm:
   api:
@@ -24,7 +29,9 @@ llm:
 source:
   arxiv:
     category: ["cs.AI","cs.CV","cs.LG","cs.CL"]
+  top_venue:
+    mailto: ${oc.env:OPENALEX_MAILTO,null}
 
 executor:
   debug: ${oc.env:DEBUG,null}
-  source: ['arxiv']
+  source: ['arxiv', 'top_venue']

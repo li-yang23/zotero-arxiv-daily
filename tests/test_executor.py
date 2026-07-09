@@ -86,8 +86,8 @@ def attach_quality_review(paper: Paper, overall_score: float) -> Paper:
 
 
 def make_render_email_recorder(calls: list, html: str = "<html>rendered email</html>"):
-    def fake_render_email(groups, language=None):
-        calls.append((groups, language))
+    def fake_render_email(groups, language=None, api_balance=None):
+        calls.append((groups, language, api_balance))
         return html
 
     return fake_render_email
@@ -316,7 +316,7 @@ def test_executor_passes_clustered_groups_to_render_email(config, monkeypatch: p
     assert clustered_papers == reranked_papers[:2]
     assert [paper.tldr for paper in clustered_papers] == ["TLDR 0", "TLDR 1"]
     assert [paper.affiliations for paper in clustered_papers] == [["Affiliation 0"], ["Affiliation 1"]]
-    assert render_calls == [(expected_groups, test_config.llm.language)]
+    assert render_calls == [(expected_groups, test_config.llm.language, None)]
     assert send_calls == [(test_config, "<html>rendered email</html>")]
 
 
@@ -350,7 +350,7 @@ def test_executor_falls_back_to_retrieved_order_when_reranker_times_out(config, 
 
     assert cluster_observed["cluster_calls"] == [papers[:2]]
     assert [paper.tldr for paper in papers[:2]] == ["TLDR 0", "TLDR 1"]
-    assert render_calls == [(expected_groups, test_config.llm.language)]
+    assert render_calls == [(expected_groups, test_config.llm.language, None)]
     assert send_calls == [(test_config, "<html>rendered email</html>")]
 
 
@@ -388,7 +388,7 @@ def test_executor_filters_reviewed_papers_below_quality_threshold(config, monkey
 
     assert cluster_observed["cluster_calls"] == [expected_selected]
     assert [paper.tldr for paper in expected_selected] == ["TLDR 0", "TLDR 2", "TLDR 4"]
-    assert render_calls == [(expected_groups, test_config.llm.language)]
+    assert render_calls == [(expected_groups, test_config.llm.language, None)]
     assert send_calls == [(test_config, "<html>rendered email</html>")]
 
 
@@ -424,7 +424,7 @@ def test_executor_falls_back_to_reranked_papers_when_quality_filter_removes_all_
     executor.run()
 
     assert cluster_observed["cluster_calls"] == [reranked_papers]
-    assert render_calls == [(expected_groups, test_config.llm.language)]
+    assert render_calls == [(expected_groups, test_config.llm.language, None)]
     assert send_calls == [(test_config, "<html>rendered email</html>")]
 
 
@@ -451,8 +451,9 @@ def test_executor_passes_fallback_group_to_render_email(config, monkeypatch: pyt
     assert len(cluster_observed["cluster_calls"]) == 1
     assert cluster_observed["cluster_calls"][0] == reranked_papers
     assert len(render_calls) == 1
-    grouped_papers, language = render_calls[0]
+    grouped_papers, language, api_balance = render_calls[0]
     assert language == test_config.llm.language
+    assert api_balance is None
     assert len(grouped_papers) == 1
     assert grouped_papers[0].label == "今日相关论文"
     assert grouped_papers[0].summary is None
@@ -507,7 +508,7 @@ def test_executor_sends_empty_email_without_clustering_when_no_papers_and_send_e
     executor.run()
 
     assert cluster_observed["cluster_calls"] == []
-    assert render_calls == [([], test_config.llm.language)]
+    assert render_calls == [([], test_config.llm.language, None)]
     assert send_calls == [(test_config, "<html>rendered email</html>")]
 
 
@@ -563,5 +564,5 @@ def test_executor_sends_empty_email_when_reranking_returns_no_selected_papers_an
     executor.run()
 
     assert cluster_observed["cluster_calls"] == []
-    assert render_calls == [([], test_config.llm.language)]
+    assert render_calls == [([], test_config.llm.language, None)]
     assert send_calls == [(test_config, "<html>rendered email</html>")]

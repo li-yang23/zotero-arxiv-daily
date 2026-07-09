@@ -85,6 +85,11 @@ email:
   smtp_server: smtp.qq.com
   smtp_port: 465
   sender_password: ${oc.env:SENDER_PASSWORD}
+  api_balance:
+    enabled: ${oc.env:API_BALANCE_ENABLED,false}
+    endpoint: ${oc.env:API_BALANCE_ENDPOINT,null}
+    json_path: ${oc.env:API_BALANCE_JSON_PATH,null}
+    currency: ${oc.env:API_BALANCE_CURRENCY,""}
 
 llm:
   api:
@@ -100,10 +105,12 @@ llm:
 source:
   arxiv:
     category: ["cs.AI","cs.CV","cs.LG","cs.CL"]
+  top_venue:
+    mailto: ${oc.env:OPENALEX_MAILTO,null}
 
 executor:
   debug: ${oc.env:DEBUG,null}
-  source: ['arxiv']
+  source: ['arxiv', 'top_venue']
 ```
 >[!NOTE]
 > `${oc.env:XXX,yyy}` means the value of the environment variable `XXX`. If the variable is not set, the default value `yyy` will be used.
@@ -128,6 +135,28 @@ source:
     category: null # The categories of target biorxiv papers. Find categories from [here](https://www.biorxiv.org/). Example: ["biochemistry","animal behavior and cognition"]
   medrxiv:
     category: null # The categories of target medrxiv papers. Find categories from [here](https://www.medrxiv.org/) Example: ["psychiatry and clinical psychology", "neurology"]
+  top_venue:
+    venues: # Target conferences and journals monitored through OpenAlex metadata.
+      - International Conference on Learning Representations
+      - International Conference on Machine Learning
+      - Neural Information Processing Systems
+      - Network and Distributed System Security Symposium
+      - USENIX Security Symposium
+      - IEEE Symposium on Security and Privacy
+      - ACM Conference on Computer and Communications Security
+      - IEEE Transactions on Information Forensics and Security
+      - IEEE Transactions on Dependable and Secure Computing
+      - IEEE Transactions on Pattern Analysis and Machine Intelligence
+      - Journal of Machine Learning Research
+      - Artificial Intelligence
+      - Nature
+      - Science
+    model_keywords: ["large language model", "llm", "language model", "foundation model", "agent", "multi-agent", "diffusion model", "text-to-image"]
+    security_keywords: ["privacy", "private", "permission", "access control", "authorization", "authentication", "confidentiality", "data leakage", "information leakage", "security", "secure", "safety", "jailbreak"]
+    lookback_days: 21 # Only retrieve papers published in the last N days. Increase for annual conference release checks. Example: 30
+    per_page: 200 # Maximum OpenAlex results per venue query. Example: 200
+    request_delay_seconds: 0.2 # Delay between OpenAlex venue queries. Example: 0.2
+    mailto: null # Optional contact email for OpenAlex polite pool. Example: abc@example.com
 
 email:
   sender: ??? # The email account of the SMTP server that sends you email. Example: abc@qq.com
@@ -135,6 +164,14 @@ email:
   smtp_server: ??? # The SMTP server that sends the email. Ask your email provider (Gmail, QQ, Outlook, ...) for its SMTP server. Example: smtp.qq.com
   smtp_port: ??? # The port of SMTP server. Example: 465
   sender_password: ??? # The password of the sender account. Note that it's not necessarily the password for logging in the e-mail client, but the authentication code for SMTP service. Ask your email provider for this. Example: abcdefghijklmn
+  api_balance:
+    enabled: false # Whether to append API balance information to the email footer. Example: true
+    endpoint: null # HTTP GET endpoint returning balance JSON from your API provider. Example: https://api.example.com/v1/user/balance
+    api_key: ${oc.env:OPENAI_API_KEY,null} # API key used for the balance endpoint. Example: sk-xxx
+    header_name: Authorization # Header used for the API key. Example: Authorization
+    header_prefix: "Bearer " # Prefix before the API key. Use "" if the endpoint expects the raw key.
+    json_path: null # Dot path to the balance field in the JSON response. Example: data.balance
+    currency: "" # Optional display suffix. Example: USD
 
 llm:
   api:
