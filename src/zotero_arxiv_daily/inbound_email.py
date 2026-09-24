@@ -234,13 +234,15 @@ class EmailRequestProcessor:
             raise ValueError("Missing email-request configuration: " + ", ".join(missing))
 
     def _fetch_message(self, client: imaplib.IMAP4_SSL, uid: bytes) -> bytes:
-        status, data = client.uid("fetch", uid, "(RFC822)")
+        # BODY.PEEK[] retrieves the complete message without setting \Seen.
+        # The request is marked only after its reply has been accepted by SMTP.
+        status, data = client.uid("fetch", uid, "(BODY.PEEK[])")
         if status != "OK":
             raise RuntimeError(f"Cannot fetch IMAP message UID {uid.decode(errors='replace')}")
         for item in data:
             if isinstance(item, tuple) and len(item) >= 2 and isinstance(item[1], bytes):
                 return item[1]
-        raise RuntimeError(f"IMAP message UID {uid.decode(errors='replace')} had no RFC822 payload")
+        raise RuntimeError(f"IMAP message UID {uid.decode(errors='replace')} had no message payload")
 
     def _connect_imap(self) -> imaplib.IMAP4_SSL:
         client = self.imap_factory(

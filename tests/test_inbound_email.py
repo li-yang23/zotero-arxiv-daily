@@ -100,6 +100,7 @@ def test_email_request_processor_reads_replies_and_marks_message_seen(config):
         def __init__(self, *_args, **_kwargs):
             self.logged_in = None
             self.stored = []
+            self.fetch_arguments = []
             self.logged_out = False
 
         def login(self, username, password):
@@ -114,6 +115,7 @@ def test_email_request_processor_reads_replies_and_marks_message_seen(config):
             if command == "search":
                 return "OK", [b"1"]
             if command == "fetch":
+                self.fetch_arguments.append(args)
                 return "OK", [(b"1 (RFC822)", raw_message)]
             if command == "store":
                 self.stored.append(args)
@@ -170,6 +172,7 @@ def test_email_request_processor_reads_replies_and_marks_message_seen(config):
         for client in fake_imaps
     )
     assert fake_imaps[0].stored == []
+    assert fake_imaps[0].fetch_arguments == [(b"1", "(BODY.PEEK[])")]
     assert fake_imaps[1].stored == [(b"1", "+FLAGS", "(\\Seen)")]
     assert all(client.logged_out for client in fake_imaps)
     assert len(sent) == 1
