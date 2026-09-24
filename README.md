@@ -45,6 +45,7 @@
   - arxiv
   - biorxiv
   - medrxiv
+- Accept a Markdown paper list by email and reply with the same style of paper summaries.
 
 ## 📷 Screenshot
 ![screenshot](./assets/screenshot.png)
@@ -229,6 +230,42 @@ Supported by [uv](https://github.com/astral-sh/uv), this workflow can easily run
 cd zotero-arxiv-daily
 uv run main.py
 ```
+
+### Request summaries by email
+
+The mailbox configured as `SENDER` can also receive on-demand paper-list requests. Send an email **from the address configured as `RECEIVER`** to `SENDER` with:
+
+- a subject beginning with `[论文摘要]`;
+- exactly one UTF-8 `.md` attachment;
+- headings for conference groups and either bare paper titles or Markdown links.
+
+For example:
+
+```markdown
+# NDSS 2026
+
+[Paper with an official page](https://example.org/paper)
+
+Paper title without a link
+```
+
+The service preserves the conference groups and input order, resolves every paper independently, and replies to the original message. Papers that cannot be matched or do not yet have a public abstract/PDF are listed explicitly instead of being silently removed.
+
+Enable IMAP access for the `SENDER` mailbox, then add one required GitHub Actions secret:
+
+| Key | Description | Example |
+| :--- | :--- | :--- |
+| `IMAP_SERVER` | IMAP-over-TLS host for the existing `SENDER` mailbox. | `imap.qq.com` |
+
+Port 993 is used by default. The workflow reuses `SENDER` and `SENDER_PASSWORD` for IMAP login and accepts mail from `RECEIVER`. If the provider uses different IMAP credentials or you want an explicit sender allowlist, optionally add:
+
+| Key | Description |
+| :--- | :--- |
+| `IMAP_USER` | IMAP username override. |
+| `IMAP_PASSWORD` | IMAP app-password override. |
+| `ALLOWED_SENDER` | One or more allowed sender addresses, separated by commas. |
+
+The workflow [`.github/workflows/email-requests.yml`](.github/workflows/email-requests.yml) checks the inbox every ten minutes and processes at most one matching unread email per run. You can test it immediately from the Actions page with **Process emailed paper lists → Run workflow**.
 
 ## 🚀 Sync with the latest version
 This project is in active development. You can subscribe this repo via `Watch` so that you can be notified once we publish new release.

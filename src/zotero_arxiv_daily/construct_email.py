@@ -35,6 +35,7 @@ def _email_labels(language: str | None) -> dict[str, str]:
             "conclusion": "结论",
             "reviewer_note": "评审备注",
             "api_balance": "API 余额",
+            "unknown": "未计算",
         }
     return {
         "empty": "No Papers Today. Take a Rest!",
@@ -53,6 +54,7 @@ def _email_labels(language: str | None) -> dict[str, str]:
         "conclusion": "Conclusion",
         "reviewer_note": "Reviewer Note",
         "api_balance": "API Balance",
+        "unknown": "Unknown",
     }
 
 
@@ -226,7 +228,7 @@ def get_stars(score:float):
 
 
 def _render_paper_html(paper: Paper, labels: dict[str, str]) -> str:
-    rate = round(paper.score, 1) if paper.score is not None else 'Unknown'
+    rate = round(paper.score, 1) if paper.score is not None else labels["unknown"]
     author_list = [author for author in paper.authors]
     num_authors = len(author_list)
     if num_authors <= 5:

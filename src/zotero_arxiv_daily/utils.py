@@ -8,7 +8,7 @@ import tempfile
 import json
 from email.header import Header
 from email.mime.text import MIMEText
-from email.utils import parseaddr, formataddr
+from email.utils import parseaddr, formataddr, formatdate, make_msgid
 from contextlib import contextmanager
 from loguru import logger
 import datetime
@@ -143,12 +143,26 @@ def glob_match(path:str, pattern:str) -> bool:
     re_pattern = glob.translate(pattern,recursive=True)
     return re.match(re_pattern, path) is not None
 
-def send_email(config:DictConfig, html:str):
+def send_email(
+    config: DictConfig,
+    html: str,
+    *,
+    receiver: str | None = None,
+    subject: str | None = None,
+    in_reply_to: str | None = None,
+    references: str | None = None,
+):
     sender = config.email.sender
-    receiver = config.email.receiver
+    receiver = receiver or config.email.receiver
     password = config.email.sender_password
     smtp_server = config.email.smtp_server
     smtp_port = config.email.smtp_port
+
+    def _safe_header(value: str) -> str:
+        if "\r" in value or "\n" in value:
+            raise ValueError("Email headers must not contain newlines")
+        return value
+
     def _format_addr(s):
         name, addr = parseaddr(s)
         return formataddr((Header(name, 'utf-8').encode(), addr))
@@ -157,18 +171,19 @@ def send_email(config:DictConfig, html:str):
     msg['From'] = _format_addr('Github Action <%s>' % sender)
     msg['To'] = _format_addr('You <%s>' % receiver)
     today = datetime.datetime.now().strftime('%Y/%m/%d')
-    msg['Subject'] = Header(f'Daily arXiv {today}', 'utf-8').encode()
+    msg['Subject'] = Header(_safe_header(subject or f'Daily arXiv {today}'), 'utf-8').encode()
+    msg['Date'] = formatdate(localtime=True)
+    msg['Message-ID'] = make_msgid(domain=parseaddr(sender)[1].partition('@')[2] or None)
+    if in_reply_to:
+        msg['In-Reply-To'] = _safe_header(in_reply_to)
+    if references:
+        msg['References'] = _safe_header(references)
 
-    try:
+    if int(smtp_port) == 465:
+        server = smtplib.SMTP_SSL(smtp_server, smtp_port)
+    else:
         server = smtplib.SMTP(smtp_server, smtp_port)
         server.starttls()
-    except Exception as e:
-        logger.debug(f"Failed to use TLS. {e}\nTry to use SSL.")
-        try:
-            server = smtplib.SMTP_SSL(smtp_server, smtp_port)
-        except Exception as e:
-            logger.debug(f"Failed to use SSL. {e}\nTry to use plain text.")
-            server = smtplib.SMTP(smtp_server, smtp_port)
 
     server.login(sender, password)
     server.sendmail(sender, [receiver], msg.as_string())

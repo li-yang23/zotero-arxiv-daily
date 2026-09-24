@@ -54,6 +54,36 @@ email:
     json_path: null # Dot path to the balance field in the JSON response. Example: data.balance
     currency: "" # Optional display suffix. Example: USD
 
+# Receive a Markdown paper list in the sender mailbox and reply with summaries.
+# username/password fall back to email.sender/email.sender_password, and
+# allowed_senders falls back to email.receiver.
+email_requests:
+  imap_server: ${oc.env:IMAP_SERVER,null} # IMAP host of the existing sender mailbox. Example: imap.qq.com
+  imap_port: ${oc.env:IMAP_PORT,993} # IMAP over TLS port. Usually 993.
+  username: ${oc.env:IMAP_USER,null} # Optional override; defaults to email.sender.
+  password: ${oc.env:IMAP_PASSWORD,null} # Optional override; defaults to email.sender_password.
+  allowed_senders: ${oc.env:ALLOWED_SENDER,null} # Comma-separated allowlist; defaults to email.receiver.
+  subject_prefix: ${oc.env:EMAIL_REQUEST_SUBJECT_PREFIX,"[论文摘要]"}
+  mailbox: INBOX
+  max_attachment_bytes: 262144
+  max_papers: 100
+  max_messages_per_run: 1
+  http_timeout: 30
+  max_html_bytes: 5000000
+  max_pdf_bytes: 50000000
+  title_match_threshold: 0.92
+  ambiguity_margin: 0.02
+  allowed_link_hosts:
+    - arxiv.org
+    - export.arxiv.org
+    - openreview.net
+    - ndss-symposium.org
+    - usenix.org
+    - ieee-security.org
+    - acm.org
+    - doi.org
+    - crossref.org
+
 llm:
   api:
     key: ??? # API Key of your LLM API. Example: sk-xxx

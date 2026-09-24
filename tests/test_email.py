@@ -1,4 +1,7 @@
 from email import message_from_string
+from email.header import decode_header, make_header
+from email.utils import parseaddr
+from copy import deepcopy
 
 import pytest
 
@@ -302,3 +305,50 @@ def test_send_email(config, papers: list[Paper], monkeypatch: pytest.MonkeyPatch
     decoded_html = parsed.get_payload(decode=True).decode("utf-8")
     assert "Vision" in decoded_html
     assert papers[0].title in decoded_html
+
+
+def test_send_email_supports_reply_recipient_subject_and_thread_headers(
+    config,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake_server = FakeSMTP(config.email.smtp_server, config.email.smtp_port)
+    monkeypatch.setattr("zotero_arxiv_daily.utils.smtplib.SMTP", lambda host, port: fake_server)
+    monkeypatch.setattr("zotero_arxiv_daily.utils.smtplib.SMTP_SSL", UnexpectedSMTPSSL)
+
+    send_email(
+        config,
+        "<html>reply</html>",
+        receiver="researcher@example.com",
+        subject="Re: [论文摘要] request",
+        in_reply_to="<request@example.com>",
+        references="<request@example.com>",
+    )
+
+    sender, receivers, raw_message = fake_server.sent
+    parsed = message_from_string(raw_message)
+    assert sender == config.email.sender
+    assert receivers == ["researcher@example.com"]
+    assert parseaddr(parsed["To"])[1] == "researcher@example.com"
+    assert str(make_header(decode_header(parsed["Subject"]))) == "Re: [论文摘要] request"
+    assert parsed["In-Reply-To"] == "<request@example.com>"
+    assert parsed["References"] == "<request@example.com>"
+
+
+def test_send_email_uses_implicit_ssl_for_port_465(config, monkeypatch: pytest.MonkeyPatch):
+    ssl_config = deepcopy(config)
+    ssl_config.email.smtp_port = 465
+    fake_server = FakeSMTP(ssl_config.email.smtp_server, ssl_config.email.smtp_port)
+
+    monkeypatch.setattr(
+        "zotero_arxiv_daily.utils.smtplib.SMTP",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("plain SMTP should not be used")),
+    )
+    monkeypatch.setattr(
+        "zotero_arxiv_daily.utils.smtplib.SMTP_SSL",
+        lambda host, port: fake_server,
+    )
+
+    send_email(ssl_config, "<html>secure</html>")
+
+    assert fake_server.logged_in == (ssl_config.email.sender, ssl_config.email.sender_password)
+    assert fake_server.closed is True
