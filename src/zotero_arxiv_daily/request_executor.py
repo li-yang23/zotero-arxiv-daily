@@ -78,4 +78,9 @@ class RequestExecutor:
                 report.groups.append(
                     PaperGroup(label=request_group.label, summary=None, papers=resolved_papers)
                 )
+        logger.info(
+            "Paper-list report ready: "
+            f"requested={report.requested_count}, resolved={report.resolved_count}, "
+            f"issues={len(report.issues)}"
+        )
         return report

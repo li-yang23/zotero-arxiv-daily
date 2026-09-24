@@ -57,6 +57,20 @@ def _plain_text(value: str | None) -> str:
     return _SPACE_PATTERN.sub(" ", without_tags).strip()
 
 
+def _abstract_from_inverted_index(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    positioned_words: list[tuple[int, str]] = []
+    for word, positions in value.items():
+        if not isinstance(positions, list):
+            continue
+        for position in positions:
+            if isinstance(position, int) and position >= 0:
+                positioned_words.append((position, str(word)))
+    positioned_words.sort(key=lambda item: item[0])
+    return _plain_text(" ".join(word for _, word in positioned_words))
+
+
 class ScholarlyHTMLParser(HTMLParser):
     BLOCK_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6", "p", "button", "li"}
     VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
@@ -366,6 +380,12 @@ class PaperResolver:
             candidates = self._search_arxiv_candidates(request.title)
             exact_arxiv = next((candidate for candidate in candidates if candidate.score == 1.0), None)
             if exact_arxiv is None:
+                candidates.extend(self._search_openalex_candidates(request.title))
+            exact_scholarly_match = next(
+                (candidate for candidate in candidates if candidate.score == 1.0),
+                None,
+            )
+            if exact_scholarly_match is None:
                 candidates.extend(self._search_crossref_candidates(request.title))
 
             selected, ambiguous_titles = self._select_candidate(candidates)
@@ -433,6 +453,40 @@ class PaperResolver:
             for result in results
         ]
 
+    def _search_openalex_candidates(self, title: str) -> list[_Candidate]:
+        params: dict[str, str | int] = {
+            "search": title,
+            "per-page": 5,
+            "select": (
+                "id,doi,title,authorships,abstract_inverted_index,"
+                "primary_location,best_oa_location"
+            ),
+        }
+        receiver = str(OmegaConf.select(self.config, "email.receiver", default="") or "")
+        if receiver:
+            params["mailto"] = receiver
+        try:
+            response = self.http_client.get("https://api.openalex.org/works", params=params)
+            response.raise_for_status()
+            items = response.json().get("results", [])
+        except Exception as exc:
+            logger.warning(f"OpenAlex title lookup failed for {title}: {exc}")
+            return []
+
+        candidates = []
+        for item in items:
+            candidate_title = str(item.get("title") or "")
+            if candidate_title:
+                candidates.append(
+                    _Candidate(
+                        title=candidate_title,
+                        score=title_similarity(title, candidate_title),
+                        source="openalex",
+                        payload=item,
+                    )
+                )
+        return candidates
+
     def _search_crossref_candidates(self, title: str) -> list[_Candidate]:
         params = {
             "query.title": title,
@@ -466,9 +520,10 @@ class PaperResolver:
         return candidates
 
     def _select_candidate(self, candidates: list[_Candidate]) -> tuple[_Candidate | None, list[str]]:
+        source_priority = {"arxiv": 2, "openalex": 1, "crossref": 0}
         viable = sorted(
             (candidate for candidate in candidates if candidate.score >= self.match_threshold),
-            key=lambda candidate: (candidate.score, candidate.source == "arxiv"),
+            key=lambda candidate: (candidate.score, source_priority.get(candidate.source, -1)),
             reverse=True,
         )
         if not viable:
@@ -485,6 +540,8 @@ class PaperResolver:
     def _materialize_candidate(self, candidate: _Candidate) -> Paper:
         if candidate.source == "arxiv":
             return self._paper_from_arxiv(candidate.payload)
+        if candidate.source == "openalex":
+            return self._paper_from_openalex(candidate.payload)
         return self._paper_from_crossref(candidate.payload)
 
     def _paper_from_arxiv(self, result: arxiv.Result) -> Paper:
@@ -498,6 +555,32 @@ class PaperResolver:
             authors=[author.name for author in result.authors],
             abstract=_plain_text(result.summary),
             url=str(result.entry_id),
+            pdf_url=pdf_url,
+            full_text=full_text,
+        )
+
+    def _paper_from_openalex(self, item: dict[str, Any]) -> Paper:
+        authors = []
+        for authorship in item.get("authorships") or []:
+            author = authorship.get("author") or {}
+            name = str(author.get("display_name") or "").strip()
+            if name:
+                authors.append(name)
+
+        location = item.get("best_oa_location") or item.get("primary_location") or {}
+        url = str(location.get("landing_page_url") or item.get("doi") or item.get("id") or "")
+        pdf_url = str(location.get("pdf_url") or "") or None
+        if url.startswith("http://arxiv.org/"):
+            url = "https://" + url.removeprefix("http://")
+        if pdf_url and pdf_url.startswith("http://arxiv.org/"):
+            pdf_url = "https://" + pdf_url.removeprefix("http://")
+        full_text = self._download_pdf_text(pdf_url) if pdf_url else None
+        return Paper(
+            source="openalex",
+            title=_plain_text(str(item.get("title") or "Untitled paper")),
+            authors=authors,
+            abstract=_abstract_from_inverted_index(item.get("abstract_inverted_index")),
+            url=url,
             pdf_url=pdf_url,
             full_text=full_text,
         )

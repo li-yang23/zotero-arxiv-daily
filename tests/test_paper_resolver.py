@@ -1,4 +1,12 @@
-from zotero_arxiv_daily.paper_resolver import extract_page_metadata, normalize_title, title_similarity
+from copy import deepcopy
+
+from zotero_arxiv_daily.paper_resolver import (
+    PaperResolver,
+    extract_page_metadata,
+    normalize_title,
+    title_similarity,
+)
+from zotero_arxiv_daily.request_models import PaperRequest
 
 
 def test_title_normalization_handles_case_punctuation_and_unicode_width():
@@ -71,3 +79,76 @@ def test_extract_page_metadata_matches_collapsible_conference_author_block():
     )
 
     assert metadata.authors == ["Xiaotian Ye, Mengqi Zhang, Shu Wu"]
+
+
+def test_resolver_uses_strict_openalex_fallback_when_arxiv_lookup_fails(config):
+    requested_title = (
+        "Rethinking Backdoor Adversarial Unlearning through the Lens of "
+        "Catastrophic Forgetting in Continual Learning"
+    )
+    payload = {
+        "results": [
+            {
+                "id": "https://openalex.org/W123",
+                "doi": None,
+                "title": requested_title,
+                "authorships": [
+                    {"author": {"display_name": "Zhenqian Zhu"}},
+                    {"author": {"display_name": "Yamin Hu"}},
+                ],
+                "abstract_inverted_index": {
+                    "Existing": [0],
+                    "defenses": [1],
+                    "are": [2],
+                    "limited.": [3],
+                },
+                "best_oa_location": {
+                    "landing_page_url": "https://arxiv.org/abs/2606.14078",
+                    "pdf_url": None,
+                },
+                "primary_location": None,
+            }
+        ]
+    }
+
+    class FailingArxivClient:
+        def results(self, _search):
+            raise RuntimeError("HTTP 406")
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return payload
+
+    class FakeHTTPClient:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            assert url == "https://api.openalex.org/works"
+            return FakeResponse()
+
+    test_config = deepcopy(config)
+    http_client = FakeHTTPClient()
+    resolver = PaperResolver(
+        test_config,
+        http_client=http_client,
+        arxiv_client=FailingArxivClient(),
+    )
+
+    resolution = resolver.resolve(PaperRequest(title=requested_title, url=None, input_index=0))
+
+    assert resolution.status == "matched"
+    assert resolution.paper is not None
+    assert resolution.paper.source == "openalex"
+    assert resolution.paper.title == requested_title
+    assert resolution.paper.authors == ["Zhenqian Zhu", "Yamin Hu"]
+    assert resolution.paper.abstract == "Existing defenses are limited."
+    assert resolution.paper.url == "https://arxiv.org/abs/2606.14078"
+    assert len(http_client.calls) == 1
+    params = http_client.calls[0][1]["params"]
+    assert params["search"] == requested_title
+    assert params["per-page"] == 5

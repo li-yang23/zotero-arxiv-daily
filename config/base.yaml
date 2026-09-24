@@ -68,6 +68,8 @@ email_requests:
   max_attachment_bytes: 262144
   max_papers: 100
   max_messages_per_run: 1
+  imap_mark_retries: 3 # Use fresh short-lived IMAP connections to persist the Seen flag.
+  imap_retry_delay_seconds: 2
   http_timeout: 30
   max_html_bytes: 5000000
   max_pdf_bytes: 50000000

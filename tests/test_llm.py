@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from zotero_arxiv_daily.protocol import Paper
+from zotero_arxiv_daily.protocol import Paper, truncate_text_by_tokens
 
 
 class FakeChatClient:
@@ -29,6 +29,12 @@ class FailingChatClient:
 
     def create(self, *args, **kwargs):
         raise RuntimeError("LLM unavailable")
+
+
+def test_token_truncation_treats_special_token_spelling_as_paper_text():
+    text = "A paper can literally contain <|endoftext|> without being a tokenizer command."
+
+    assert truncate_text_by_tokens(text, 100) == text
 
 
 @pytest.fixture

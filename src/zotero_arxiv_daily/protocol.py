@@ -12,7 +12,9 @@ RawPaperItem = TypeVar('RawPaperItem')
 def truncate_text_by_tokens(text: str, max_tokens: int) -> str:
     try:
         enc = tiktoken.encoding_for_model("gpt-4o")
-        text_tokens = enc.encode(text)
+        # Paper text is untrusted source material and may legitimately contain
+        # strings that tiktoken reserves as special-token spellings.
+        text_tokens = enc.encode(text, disallowed_special=())
         return enc.decode(text_tokens[:max_tokens])
     except Exception as e:
         logger.warning(f"Failed to load tokenizer, falling back to character truncation: {e}")

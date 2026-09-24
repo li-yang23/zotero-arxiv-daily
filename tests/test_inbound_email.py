@@ -1,3 +1,4 @@
+import imaplib
 from email.message import EmailMessage
 
 import pytest
@@ -148,20 +149,96 @@ def test_email_request_processor_reads_replies_and_marks_message_seen(config):
     test_config = deepcopy(config)
     test_config.email_requests.imap_server = "imap.example.com"
     sent = []
-    fake_imap = FakeIMAP()
+    fake_imaps = []
+
+    def make_fake_imap(*_args, **_kwargs):
+        client = FakeIMAP()
+        fake_imaps.append(client)
+        return client
 
     processor = EmailRequestProcessor(
         test_config,
-        imap_factory=lambda *_args, **_kwargs: fake_imap,
+        imap_factory=make_fake_imap,
         executor_factory=FakeExecutor,
         send_email_func=lambda *args, **kwargs: sent.append((args, kwargs)),
     )
 
     assert processor.run_once() == 1
-    assert fake_imap.logged_in == (test_config.email.sender, test_config.email.sender_password)
-    assert fake_imap.stored == [(b"1", "+FLAGS", "(\\Seen)")]
-    assert fake_imap.logged_out is True
+    assert len(fake_imaps) == 2
+    assert all(
+        client.logged_in == (test_config.email.sender, test_config.email.sender_password)
+        for client in fake_imaps
+    )
+    assert fake_imaps[0].stored == []
+    assert fake_imaps[1].stored == [(b"1", "+FLAGS", "(\\Seen)")]
+    assert all(client.logged_out for client in fake_imaps)
     assert len(sent) == 1
     assert sent[0][1]["receiver"] == test_config.email.receiver
     assert sent[0][1]["subject"] == "Re: [论文摘要] Security papers"
     assert sent[0][1]["in_reply_to"] == "<request-1@example.com>"
+
+
+def test_email_request_processor_retries_seen_flag_with_another_fresh_connection(config):
+    raw_message = make_message(sender=config.email.receiver)
+    clients = []
+
+    class FakeIMAP:
+        def __init__(self, *_args, **_kwargs):
+            self.index = len(clients)
+            self.stored = []
+            self.logged_out = False
+            clients.append(self)
+
+        def login(self, _username, _password):
+            return "OK", []
+
+        def select(self, _mailbox):
+            return "OK", [b"1"]
+
+        def uid(self, command, *args):
+            if command == "search":
+                return "OK", [b"1"]
+            if command == "fetch":
+                return "OK", [(b"1 (RFC822)", raw_message)]
+            if command == "store":
+                if self.index == 1:
+                    raise imaplib.IMAP4.abort("socket error: connection reset")
+                self.stored.append(args)
+                return "OK", []
+            raise AssertionError(command)
+
+        def logout(self):
+            self.logged_out = True
+
+    class FakeExecutor:
+        def __init__(self, _config):
+            pass
+
+        def process(self, _groups):
+            return RequestReport(requested_count=1)
+
+        def close(self):
+            pass
+
+    test_config = deepcopy(config)
+    test_config.email_requests.imap_server = "imap.example.com"
+    test_config.email_requests.imap_mark_retries = 2
+    test_config.email_requests.imap_retry_delay_seconds = 0
+    sent = []
+    sleeps = []
+    processor = EmailRequestProcessor(
+        test_config,
+        imap_factory=FakeIMAP,
+        executor_factory=FakeExecutor,
+        send_email_func=lambda *args, **kwargs: sent.append((args, kwargs)),
+        sleep_func=lambda seconds: sleeps.append(seconds),
+    )
+
+    assert processor.run_once() == 1
+    assert len(sent) == 1
+    assert len(clients) == 3
+    assert clients[0].stored == []
+    assert clients[1].stored == []
+    assert clients[2].stored == [(b"1", "+FLAGS", "(\\Seen)")]
+    assert all(client.logged_out for client in clients)
+    assert sleeps == [0.0]

@@ -1,6 +1,7 @@
 import imaplib
 import re
 import ssl
+import time
 from dataclasses import dataclass
 from email import policy
 from email.message import Message
@@ -106,11 +107,13 @@ class EmailRequestProcessor:
         imap_factory: Callable[..., imaplib.IMAP4_SSL] = imaplib.IMAP4_SSL,
         executor_factory: Callable[[DictConfig], RequestExecutor] = RequestExecutor,
         send_email_func=send_email,
+        sleep_func: Callable[[float], None] = time.sleep,
     ):
         self.config = config
         self.imap_factory = imap_factory
         self.executor_factory = executor_factory
         self.send_email_func = send_email_func
+        self.sleep_func = sleep_func
 
         self.imap_server = str(OmegaConf.select(config, "email_requests.imap_server", default="") or "")
         self.imap_port = int(OmegaConf.select(config, "email_requests.imap_port", default=993))
@@ -145,21 +148,20 @@ class EmailRequestProcessor:
         self.max_messages_per_run = int(
             OmegaConf.select(config, "email_requests.max_messages_per_run", default=1)
         )
+        self.imap_mark_retries = max(
+            1,
+            int(OmegaConf.select(config, "email_requests.imap_mark_retries", default=3)),
+        )
+        self.imap_retry_delay_seconds = max(
+            0.0,
+            float(OmegaConf.select(config, "email_requests.imap_retry_delay_seconds", default=2)),
+        )
 
     def run_once(self) -> int:
         self._validate_config()
-        client = self.imap_factory(
-            self.imap_server,
-            self.imap_port,
-            ssl_context=ssl.create_default_context(),
-            timeout=30,
-        )
+        client = self._connect_imap()
         processed = 0
         try:
-            client.login(self.imap_username, self.imap_password)
-            status, _ = client.select(self.mailbox)
-            if status != "OK":
-                raise RuntimeError(f"Cannot select IMAP mailbox {self.mailbox}")
             status, search_data = client.uid("search", None, "UNSEEN")
             if status != "OK":
                 raise RuntimeError("Cannot search unread IMAP messages")
@@ -191,7 +193,7 @@ class EmailRequestProcessor:
                     )
                     html = render_request_error(str(exc), self.config.llm.language)
                     self._reply(request, html)
-                    self._mark_seen(client, uid)
+                    self._mark_seen_reliably(uid)
                     processed += 1
                     continue
 
@@ -211,13 +213,10 @@ class EmailRequestProcessor:
                     html = render_request_error(str(exc), self.config.llm.language)
 
                 self._reply(request, html)
-                self._mark_seen(client, uid)
+                self._mark_seen_reliably(uid)
                 processed += 1
         finally:
-            try:
-                client.logout()
-            except Exception:
-                pass
+            self._logout_quietly(client)
         logger.info(f"Processed {processed} paper-list request email(s)")
         return processed
 
@@ -243,6 +242,30 @@ class EmailRequestProcessor:
                 return item[1]
         raise RuntimeError(f"IMAP message UID {uid.decode(errors='replace')} had no RFC822 payload")
 
+    def _connect_imap(self) -> imaplib.IMAP4_SSL:
+        client = self.imap_factory(
+            self.imap_server,
+            self.imap_port,
+            ssl_context=ssl.create_default_context(),
+            timeout=30,
+        )
+        try:
+            client.login(self.imap_username, self.imap_password)
+            status, _ = client.select(self.mailbox)
+            if status != "OK":
+                raise RuntimeError(f"Cannot select IMAP mailbox {self.mailbox}")
+            return client
+        except Exception:
+            self._logout_quietly(client)
+            raise
+
+    @staticmethod
+    def _logout_quietly(client: imaplib.IMAP4_SSL) -> None:
+        try:
+            client.logout()
+        except Exception:
+            pass
+
     def _reply(self, request: InboundRequest, html: str) -> None:
         subject = request.subject if request.subject.casefold().startswith("re:") else f"Re: {request.subject}"
         self.send_email_func(
@@ -253,8 +276,39 @@ class EmailRequestProcessor:
             in_reply_to=request.message_id,
             references=request.message_id,
         )
+        logger.info("SMTP accepted paper-summary reply")
 
     def _mark_seen(self, client: imaplib.IMAP4_SSL, uid: bytes) -> None:
         status, _ = client.uid("store", uid, "+FLAGS", "(\\Seen)")
         if status != "OK":
             raise RuntimeError(f"Cannot mark IMAP message UID {uid.decode(errors='replace')} as seen")
+
+    def _mark_seen_reliably(self, uid: bytes) -> None:
+        last_error: Exception | None = None
+        for attempt in range(1, self.imap_mark_retries + 1):
+            client = None
+            try:
+                # Paper processing can take hours. Never reuse the long-idle fetch
+                # connection for the final state update.
+                client = self._connect_imap()
+                self._mark_seen(client, uid)
+                logger.info(
+                    f"Marked paper-list request UID {uid.decode(errors='replace')} as seen"
+                )
+                return
+            except Exception as exc:
+                last_error = exc
+                if attempt >= self.imap_mark_retries:
+                    break
+                logger.warning(
+                    "Failed to mark paper-list request as seen "
+                    f"(attempt {attempt}/{self.imap_mark_retries}); retrying: {exc}"
+                )
+                self.sleep_func(self.imap_retry_delay_seconds)
+            finally:
+                if client is not None:
+                    self._logout_quietly(client)
+        raise RuntimeError(
+            f"Cannot mark IMAP message UID {uid.decode(errors='replace')} as seen "
+            f"after {self.imap_mark_retries} attempt(s): {last_error}"
+        ) from last_error

@@ -1,3 +1,4 @@
+import smtplib
 from email import message_from_string
 from email.header import decode_header, make_header
 from email.utils import parseaddr
@@ -351,4 +352,20 @@ def test_send_email_uses_implicit_ssl_for_port_465(config, monkeypatch: pytest.M
     send_email(ssl_config, "<html>secure</html>")
 
     assert fake_server.logged_in == (ssl_config.email.sender, ssl_config.email.sender_password)
+    assert fake_server.closed is True
+
+
+def test_send_email_raises_when_smtp_refuses_the_recipient(config, monkeypatch: pytest.MonkeyPatch):
+    class RefusingSMTP(FakeSMTP):
+        def sendmail(self, sender: str, receivers: list[str], message: str):
+            super().sendmail(sender, receivers, message)
+            return {receivers[0]: (550, b"recipient rejected")}
+
+    fake_server = RefusingSMTP(config.email.smtp_server, config.email.smtp_port)
+    monkeypatch.setattr("zotero_arxiv_daily.utils.smtplib.SMTP", lambda host, port: fake_server)
+    monkeypatch.setattr("zotero_arxiv_daily.utils.smtplib.SMTP_SSL", UnexpectedSMTPSSL)
+
+    with pytest.raises(smtplib.SMTPRecipientsRefused):
+        send_email(config, "<html>reply</html>")
+
     assert fake_server.closed is True

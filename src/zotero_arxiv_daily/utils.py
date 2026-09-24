@@ -185,9 +185,16 @@ def send_email(
         server = smtplib.SMTP(smtp_server, smtp_port)
         server.starttls()
 
-    server.login(sender, password)
-    server.sendmail(sender, [receiver], msg.as_string())
-    server.quit()
+    try:
+        server.login(sender, password)
+        refused = server.sendmail(sender, [receiver], msg.as_string())
+        if refused:
+            raise smtplib.SMTPRecipientsRefused(refused)
+    finally:
+        try:
+            server.quit()
+        except Exception as exc:
+            logger.warning(f"SMTP connection cleanup failed after send attempt: {exc}")
 
 
 def fetch_api_balance(config: DictConfig) -> str | None:
