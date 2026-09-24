@@ -148,6 +148,17 @@ class EmailRequestProcessor:
         self.max_messages_per_run = int(
             OmegaConf.select(config, "email_requests.max_messages_per_run", default=1)
         )
+        reprocess_latest = OmegaConf.select(
+            config,
+            "email_requests.reprocess_latest",
+            default=False,
+        )
+        self.reprocess_latest = str(reprocess_latest).strip().casefold() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         self.imap_mark_retries = max(
             1,
             int(OmegaConf.select(config, "email_requests.imap_mark_retries", default=3)),
@@ -162,11 +173,19 @@ class EmailRequestProcessor:
         client = self._connect_imap()
         processed = 0
         try:
-            status, search_data = client.uid("search", None, "UNSEEN")
+            search_criterion = "ALL" if self.reprocess_latest else "UNSEEN"
+            status, search_data = client.uid("search", None, search_criterion)
             if status != "OK":
-                raise RuntimeError("Cannot search unread IMAP messages")
+                raise RuntimeError(f"Cannot search IMAP messages with {search_criterion}")
             message_uids = search_data[0].split() if search_data and search_data[0] else []
-            logger.info(f"Found {len(message_uids)} unread email(s) in {self.mailbox}")
+            if self.reprocess_latest:
+                message_uids.reverse()
+                logger.warning(
+                    "Manual replay enabled; scanning "
+                    f"{len(message_uids)} mailbox message(s) from newest to oldest"
+                )
+            else:
+                logger.info(f"Found {len(message_uids)} unread email(s) in {self.mailbox}")
 
             for uid in message_uids:
                 if processed >= self.max_messages_per_run:

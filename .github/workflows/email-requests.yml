@@ -2,6 +2,12 @@ name: Process emailed paper lists
 
 on:
   workflow_dispatch:
+    inputs:
+      reprocess_latest:
+        description: Reprocess the newest matching request even if it is already read
+        required: false
+        default: false
+        type: boolean
   schedule:
     # Avoid the top of the hour, when scheduled Actions are more likely to queue.
     - cron: '7/10 * * * *'
@@ -41,6 +47,7 @@ jobs:
           IMAP_USER: ${{ secrets.IMAP_USER }}
           IMAP_PASSWORD: ${{ secrets.IMAP_PASSWORD }}
           ALLOWED_SENDER: ${{ secrets.ALLOWED_SENDER }}
+          REPROCESS_LATEST: ${{ inputs.reprocess_latest || 'false' }}
           CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
         run: |
           printf "%b\n" "$CUSTOM_CONFIG" > config/custom.yaml

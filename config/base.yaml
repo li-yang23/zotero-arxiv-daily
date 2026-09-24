@@ -68,6 +68,7 @@ email_requests:
   max_attachment_bytes: 262144
   max_papers: 100
   max_messages_per_run: 1
+  reprocess_latest: ${oc.env:REPROCESS_LATEST,false} # Manual recovery only; scheduled runs keep this false.
   imap_mark_retries: 3 # Use fresh short-lived IMAP connections to persist the Seen flag.
   imap_retry_delay_seconds: 2
   http_timeout: 30
