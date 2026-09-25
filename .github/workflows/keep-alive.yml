@@ -3,12 +3,19 @@ name: Keep Alive
 on:
   workflow_dispatch:
   schedule:
-    # Run every 30 days at 00:00 UTC to keep the repository active
-    - cron: '0 0 */30 * *'
+    # A monthly commit keeps public-repository activity well inside GitHub's
+    # 60-day scheduled-workflow inactivity window. Avoid the top of the hour,
+    # when scheduled Actions are more likely to be delayed or dropped.
+    - cron: '17 3 1 * *'
+
+concurrency:
+  group: keep-alive
+  cancel-in-progress: false
 
 jobs:
   keep-alive:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
