@@ -91,20 +91,19 @@ emerging energy-efficient AI hardware accelerators based on novel non-volatile m
 
 def test_tldr(config, paper: Paper):
     openai_client = FakeChatClient(
-        '{"concise_summary": "A compact five-question digest.", '
-        '"detailed_summary": "A full ten-question analysis."}'
+        '{"concise_summary": "A compact five-question digest."}'
     )
 
     paper.generate_tldr(openai_client, config.llm)
 
     assert paper.tldr == "A compact five-question digest."
-    assert paper.detailed_summary == "A full ten-question analysis."
+    assert paper.detailed_summary is None
     request = openai_client.requests[0]
     assert request["messages"][0]["role"] == "system"
     assert request["response_format"] == {"type": "json_object"}
     assert "high-density paper digests" in request["messages"][0]["content"]
     assert "concise_summary" in request["messages"][1]["content"]
-    assert "whether the problem still needs further research" in request["messages"][1]["content"]
+    assert "detailed_summary" not in request["messages"][1]["content"]
     assert "GRASP" in request["messages"][1]["content"]
 
 
@@ -115,15 +114,15 @@ def test_tldr_falls_back_to_next_model_when_output_is_invalid(config, paper: Pap
     }
     openai_client = FakeChatClient(
         [
-            '{"concise_summary": "missing detailed summary"}',
-            '{"concise_summary": "Recovered concise digest.", "detailed_summary": "Recovered full analysis."}',
+            '{"concise_summary": null}',
+            '{"concise_summary": "Recovered concise digest."}',
         ]
     )
 
     paper.generate_tldr(openai_client, llm_params)
 
     assert paper.tldr == "Recovered concise digest."
-    assert paper.detailed_summary == "Recovered full analysis."
+    assert paper.detailed_summary is None
     assert [request["model"] for request in openai_client.requests] == ["bad-model", "good-model"]
 
 
@@ -148,3 +147,10 @@ def test_affiliations(config, paper: Paper):
     assert request["messages"][0]["role"] == "system"
     assert "extracts affiliations of authors" in request["messages"][0]["content"]
     assert "The Pennsylvania State University" in request["messages"][1]["content"]
+
+
+def test_strict_summary_does_not_send_failure_placeholder(config, paper):
+    with pytest.raises(RuntimeError, match="Summary generation failed"):
+        paper.generate_tldr(FailingChatClient(), config.llm, strict=True)
+    assert paper.tldr is None
+    assert paper.detailed_summary is None

@@ -39,7 +39,7 @@ def test_request_executor_keeps_all_resolved_papers_without_quality_filtering(co
         abstract="Abstract",
         url="https://example.com/one",
     )
-    paper.generate_tldr = lambda *_args: setattr(paper, "tldr", "Summary") or "Summary"
+    paper.generate_tldr = lambda *_args, **_kwargs: setattr(paper, "tldr", "Summary") or "Summary"
     resolver = FakeResolver(
         [
             PaperResolution(request=requests[0], status="matched", paper=paper),

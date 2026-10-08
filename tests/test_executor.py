@@ -39,7 +39,7 @@ def make_corpus() -> list[CorpusPaper]:
 
 
 def stub_generation_methods(paper: Paper, index: int) -> Paper:
-    def generate_tldr(_openai_client, _llm_params, paper=paper, index=index):
+    def generate_tldr(_openai_client, _llm_params, paper=paper, index=index, *, strict=False):
         paper.tldr = f"TLDR {index}"
         return paper.tldr
 

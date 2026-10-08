@@ -1,0 +1,70 @@
+name: Replay daily digests
+on:
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: JSON manifest of original run IDs, email dates and paper URLs
+        required: true
+        type: string
+      send:
+        description: Send the regenerated emails to the configured receiver
+        type: boolean
+        default: false
+      resume_run:
+        description: Previous replay run whose checkpoint should be restored
+        type: string
+        required: false
+
+concurrency:
+  group: replay-daily-digests
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - name: Restore previous checkpoint
+        if: inputs.resume_run != '' || github.run_attempt > 1
+        uses: actions/download-artifact@v4
+        with:
+          name: digest-replay
+          path: outputs/digest-replay
+          run-id: ${{ inputs.resume_run || github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Regenerate original paper lists
+        env:
+          SENDER: ${{ secrets.SENDER }}
+          RECEIVER: ${{ secrets.RECEIVER }}
+          SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
+          CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
+          REPLAY_MANIFEST: ${{ inputs.manifest }}
+          REPLAY_SEND: ${{ inputs.send }}
+          API_BALANCE_ENABLED: ${{ vars.API_BALANCE_ENABLED }}
+          API_BALANCE_ENDPOINT: ${{ secrets.API_BALANCE_ENDPOINT }}
+          API_BALANCE_JSON_PATH: ${{ vars.API_BALANCE_JSON_PATH }}
+          API_BALANCE_CURRENCY: ${{ vars.API_BALANCE_CURRENCY }}
+        run: |
+          if [ -n "$CUSTOM_CONFIG" ]; then
+            printf '%b\n' "$CUSTOM_CONFIG" > config/custom.yaml
+          fi
+          args=()
+          if [ "$REPLAY_SEND" = true ]; then args+=(--send); fi
+          uv run python -m zotero_arxiv_daily.replay_daily "${args[@]}"
+      - name: Save generated digests and delivery checkpoint
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-replay
+          path: outputs/digest-replay
+          if-no-files-found: ignore
+          overwrite: true
+          retention-days: 30

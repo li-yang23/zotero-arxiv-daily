@@ -80,7 +80,7 @@ def render_request_email(report: RequestReport, language: str | None = None) -> 
         if _uses_chinese(language)
         else "This is an automated reply to your Markdown paper-list request."
     )
-    return framework.replace("__CONTENT__", content).replace("__UNSUBSCRIBE__", footer)
+    return framework.replace("__CONTENT__", content).replace("__UNSUBSCRIBE__", footer).replace("__API_BALANCE__", "")
 
 
 def render_request_error(message: str, language: str | None = None) -> str:
@@ -96,4 +96,4 @@ def render_request_error(message: str, language: str | None = None) -> str:
         f'<h2 style="margin-top: 0;">{escape(title)}</h2>'
         f'<p>{escape(lead)}</p><p>{escape(message)}</p></div>'
     )
-    return framework.replace("__CONTENT__", content).replace("__UNSUBSCRIBE__", "")
+    return framework.replace("__CONTENT__", content).replace("__UNSUBSCRIBE__", "").replace("__API_BALANCE__", "")

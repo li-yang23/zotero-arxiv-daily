@@ -24,8 +24,6 @@ def _email_labels(language: str | None) -> dict[str, str]:
             "affiliation_unknown": "未知机构",
             "relevance": "相关度",
             "tldr": "论文总结",
-            "full_summary": "完整分析",
-            "show_full_summary": "展开完整分析",
             "quality": "质量评分",
             "innovation": "创新性",
             "rigor": "严谨性",
@@ -43,8 +41,6 @@ def _email_labels(language: str | None) -> dict[str, str]:
         "affiliation_unknown": "Unknown Affiliation",
         "relevance": "Relevance",
         "tldr": "TLDR",
-        "full_summary": "Full Analysis",
-        "show_full_summary": "Show full analysis",
         "quality": "Quality",
         "innovation": "Innovation",
         "rigor": "Rigor",
@@ -121,7 +117,6 @@ def get_block_html(
     pdf_url: str,
     labels: dict[str, str],
     affiliations: str = None,
-    detailed_summary: str = "",
     quality_review: str = "",
 ):
     block_template = """
@@ -148,7 +143,6 @@ def get_block_html(
             <strong>{tldr_label}:</strong> {tldr}
         </td>
     </tr>
-    {detailed_summary}
     {quality_review}
 
     <tr>
@@ -167,26 +161,8 @@ def get_block_html(
         relevance_label=labels["relevance"],
         tldr_label=labels["tldr"],
         affiliations=affiliations,
-        detailed_summary=detailed_summary,
         quality_review=quality_review,
     )
-
-
-def get_detailed_summary_html(paper: Paper, labels: dict[str, str]) -> str:
-    if not paper.detailed_summary:
-        return ""
-    return f"""
-    <tr>
-        <td style="font-size: 16px; color: #333; padding: 8px 0; line-height: 1.5;">
-            <details>
-                <summary style="cursor: pointer; font-weight: bold; color: #2b5c8a;">{labels["show_full_summary"]}</summary>
-                <div style="margin-top: 8px; line-height: 1.55; white-space: pre-wrap;">
-                    <strong>{labels["full_summary"]}:</strong> {escape(paper.detailed_summary)}
-                </div>
-            </details>
-        </td>
-    </tr>
-"""
 
 
 def get_quality_review_html(paper: Paper, labels: dict[str, str]) -> str:
@@ -250,7 +226,6 @@ def _render_paper_html(paper: Paper, labels: dict[str, str]) -> str:
         escape(paper.pdf_url or paper.url),
         labels,
         escape(affiliations),
-        get_detailed_summary_html(paper, labels),
         get_quality_review_html(paper, labels),
     )
 

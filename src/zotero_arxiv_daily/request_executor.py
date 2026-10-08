@@ -57,7 +57,7 @@ class RequestExecutor:
                     review = self.quality_reviewer.review_paper(paper)
                     if review is not None:
                         paper.quality_review = review
-                    paper.generate_tldr(self.openai_client, self.config.llm)
+                    paper.generate_tldr(self.openai_client, self.config.llm, strict=True)
                     if paper.full_text:
                         paper.generate_affiliations(self.openai_client, self.config.llm)
                 else:

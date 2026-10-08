@@ -53,20 +53,12 @@ class Paper:
         prompt = (
             f"Given the following information of a paper, write a precise and concise research digest in {lang}. "
             "Do not copy the source abstract verbatim. Infer only what the paper text supports; if a point is unclear, say so briefly. "
-            "Return JSON only with exactly these two string keys: concise_summary and detailed_summary.\n\n"
+            "Return JSON only with exactly one string key: concise_summary.\n\n"
             "concise_summary should be one compact paragraph, preferably 4-6 sentences, answering these questions when possible: "
             "1) what problem the paper studies; 2) why the problem is worth studying; "
             "3) what existing methods roughly do and how far they get; "
-            "4) why the problem still needs this paper; 5) how this paper solves it.\n\n"
-            "detailed_summary should be a compact but complete analysis, preferably 8-12 short sentences or 4-6 dense bullet-like clauses, "
-            "covering all of these questions when possible: "
-            "1) what problem is studied; 2) why it matters; 3) what prior methods do and their current progress; "
-            "4) why further work is needed; 5) how this paper solves it; "
-            "6) what effect the paper claims, distinguishing solved, alleviated, improved, or analyzed; "
-            "7) why the design should achieve that claimed effect; "
-            "8) what experiments evaluate, and what dimensions should be evaluated for this problem; "
-            "9) whether the results support the claimed effect; "
-            "10) whether the problem still needs further research.\n\n"
+            "4) why the problem still needs this paper; 5) how this paper solves it; "
+            "6) the main results and limitations supported by the provided text.\n\n"
         )
         if self.title:
             prompt += f"Title:\n {self.title}\n\n"
@@ -79,7 +71,7 @@ class Paper:
 
         if not self.full_text and not self.abstract:
             logger.warning(f"Neither full text nor abstract is provided for {self.url}")
-            return "Failed to generate TLDR. Neither full text nor abstract is provided"
+            raise ValueError("Neither full text nor abstract is provided")
         
         prompt = truncate_text_by_tokens(prompt, 4000)
         
@@ -104,27 +96,29 @@ class Paper:
                 )
                 content = response.choices[0].message.content
                 payload = json.loads(content or "{}")
-                concise_summary = str(payload["concise_summary"]).strip()
-                detailed_summary = str(payload["detailed_summary"]).strip()
-                if not concise_summary or not detailed_summary:
-                    raise ValueError("summary fields must be non-empty")
-                self.detailed_summary = detailed_summary
-                return concise_summary
+                concise_summary = payload["concise_summary"]
+                if not isinstance(concise_summary, str) or not concise_summary.strip():
+                    raise ValueError("concise_summary must be a non-empty string")
+                self.detailed_summary = None
+                return concise_summary.strip()
             except Exception as e:
                 last_error = e
                 logger.warning(f"Failed to generate summary of {self.url} with model {generation_kwargs.get('model')}: {e}")
         raise last_error or RuntimeError("No LLM model configured")
     
-    def generate_tldr(self, openai_client:OpenAI,llm_params:dict) -> str:
+    def generate_tldr(self, openai_client:OpenAI,llm_params:dict, *, strict: bool = False) -> str:
         try:
             tldr = self._generate_tldr_with_llm(openai_client,llm_params)
             self.tldr = tldr
             return tldr
         except Exception as e:
             logger.warning(f"Failed to generate tldr of {self.url}: {e}")
+            self.detailed_summary = None
+            if strict:
+                self.tldr = None
+                raise RuntimeError(f"Summary generation failed for {self.url}") from e
             tldr = self._fallback_tldr(llm_params)
             self.tldr = tldr
-            self.detailed_summary = self.abstract
             return tldr
 
     def _fallback_tldr(self, llm_params: dict) -> str:
