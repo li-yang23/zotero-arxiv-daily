@@ -18,6 +18,10 @@ on:
         description: Delivery revision; reuse it when resuming to avoid duplicate mail
         type: string
         default: revised
+      affiliation_overrides:
+        description: Optional JSON mapping paper URLs to institutions verified in the paper text
+        type: string
+        default: '{}'
 
 concurrency:
   group: replay-daily-digests
@@ -55,6 +59,7 @@ jobs:
           REPLAY_MANIFEST: ${{ inputs.manifest }}
           REPLAY_SEND: ${{ inputs.send }}
           REPLAY_REVISION: ${{ inputs.revision }}
+          REPLAY_AFFILIATION_OVERRIDES: ${{ inputs.affiliation_overrides }}
           API_BALANCE_ENABLED: ${{ vars.API_BALANCE_ENABLED }}
           API_BALANCE_ENDPOINT: ${{ secrets.API_BALANCE_ENDPOINT }}
           API_BALANCE_JSON_PATH: ${{ vars.API_BALANCE_JSON_PATH }}

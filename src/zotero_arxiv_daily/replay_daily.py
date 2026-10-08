@@ -89,9 +89,17 @@ def validate_complete_paper(paper: Paper) -> None:
         raise ValueError(f"Missing affiliation extraction: {paper.url}")
 
 
-def replay(config, entries, output_dir: Path, *, send: bool, workers: int = 8, revision: str = "revised") -> int:
+def replay(config, entries, output_dir: Path, *, send: bool, workers: int = 8, revision: str = "revised", affiliation_overrides: dict | None = None) -> int:
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", revision):
         raise ValueError("Invalid delivery revision")
+    affiliation_overrides = affiliation_overrides or {}
+    requested_urls = {url for entry in entries for url in entry["urls"]}
+    if not isinstance(affiliation_overrides, dict) or any(
+        url not in requested_urls or not isinstance(names, list) or not names
+        or any(not isinstance(name, str) or not name.strip() for name in names)
+        for url, names in affiliation_overrides.items()
+    ):
+        raise ValueError("Affiliation corrections must contain requested URLs and non-empty institution names")
     state_path = output_dir / "state.json"
     state = json.loads(state_path.read_text()) if state_path.exists() else {"emails": {}, "papers": {}}
     summaries = state["papers"]
@@ -142,7 +150,15 @@ def replay(config, entries, output_dir: Path, *, send: bool, workers: int = 8, r
             paper = Paper(**summaries[url])
             if not paper.tldr:
                 paper.generate_tldr(openai_client, config.llm, strict=True)
-            if paper.affiliations is None:
+            if url in affiliation_overrides:
+                if not paper.full_text:
+                    paper.full_text = fetch_affiliation_text(paper, http_client)
+                normalized_text = " ".join(paper.full_text.casefold().split())
+                names = affiliation_overrides[url]
+                if any(" ".join(name.casefold().split()) not in normalized_text for name in names):
+                    raise ValueError(f"Affiliation correction not supported by extracted paper text: {url}")
+                paper.affiliations = list(dict.fromkeys(name.strip() for name in names))
+            elif paper.affiliations is None:
                 if not paper.full_text:
                     paper.full_text = fetch_affiliation_text(paper, http_client)
                 paper.generate_affiliations(metadata_client, config.llm, strict=True)
@@ -222,7 +238,8 @@ def main():
     config_dir = Path(__file__).resolve().parents[2] / "config"
     with initialize_config_dir(version_base=None, config_dir=str(config_dir)):
         config = compose(config_name="default", overrides=["llm.language=Chinese"])
-    count = replay(config, entries, args.output_dir, send=args.send, revision=args.revision)
+    corrections = json.loads(os.environ.get("REPLAY_AFFILIATION_OVERRIDES") or "{}")
+    count = replay(config, entries, args.output_dir, send=args.send, revision=args.revision, affiliation_overrides=corrections)
     logger.info(f"Replay complete: {count} revised email(s) accepted by SMTP")
 
 

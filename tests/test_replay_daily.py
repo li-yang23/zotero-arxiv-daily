@@ -164,6 +164,22 @@ def test_replay_retries_failed_paper_without_discarding_other_results(config, tm
     assert len(replay_setup) == 1
 
 
+def test_replay_accepts_only_source_supported_affiliation_corrections(config, tmp_path, replay_setup):
+    entries = validate_manifest(manifest())
+    url = entries[0]["urls"][0]
+    with pytest.raises(ValueError, match="not supported"):
+        replay(config, entries, tmp_path, send=True, affiliation_overrides={url: ["Invented Institute"]})
+    assert replay_setup == []
+    assert replay(config, entries, tmp_path, send=True, affiliation_overrides={url: ["Test University"]}) == 1
+
+
+def test_replay_rejects_corrections_for_unrequested_papers(config, tmp_path, replay_setup):
+    with pytest.raises(ValueError, match="requested URLs"):
+        replay(config, validate_manifest(manifest()), tmp_path, send=True,
+               affiliation_overrides={"https://arxiv.org/abs/2609.99999": ["Test University"]})
+    assert replay_setup == []
+
+
 def test_manifest_rejects_untrusted_links_and_duplicate_runs():
     payload = manifest()
     payload["emails"][0]["urls"][0] = "https://example.com/private"
