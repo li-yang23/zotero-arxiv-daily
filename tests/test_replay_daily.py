@@ -1,6 +1,7 @@
 from contextlib import nullcontext
 import json
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -18,7 +19,8 @@ def manifest():
 
 @pytest.fixture
 def replay_setup(monkeypatch):
-    monkeypatch.setattr(replay_module, "OpenAI", lambda **kwargs: nullcontext())
+    client = MagicMock()
+    monkeypatch.setattr(replay_module, "OpenAI", lambda **kwargs: client)
     monkeypatch.setattr(replay_module.httpx, "Client", lambda **kwargs: nullcontext())
     monkeypatch.setattr(replay_module, "TopicClusterer", lambda *args: SimpleNamespace(
         cluster_papers=lambda papers: [PaperGroup("Topic", None, papers)],
@@ -63,6 +65,15 @@ def test_replay_dry_run_then_send(config, tmp_path, replay_setup):
     assert replay(config, entries, tmp_path, send=False) == 0
     assert replay_setup == []
     assert replay(config, entries, tmp_path, send=True) == 1
+
+
+def test_replay_bounds_clustering_retries(config, tmp_path, replay_setup, monkeypatch):
+    client = replay_module.OpenAI()
+    clusterer = MagicMock(wraps=replay_module.TopicClusterer)
+    monkeypatch.setattr(replay_module, "TopicClusterer", clusterer)
+    replay(config, validate_manifest(manifest()), tmp_path, send=False)
+    client.with_options.assert_called_once_with(max_retries=0)
+    assert clusterer.call_args.args[0] is client.with_options.return_value
 
 
 def test_replay_stops_after_uncertain_delivery(config, tmp_path, replay_setup, monkeypatch):

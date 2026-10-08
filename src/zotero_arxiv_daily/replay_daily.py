@@ -84,7 +84,8 @@ def replay(config, entries, output_dir: Path, *, send: bool, workers: int = 8) -
         api_key=config.llm.api.key, base_url=config.llm.api.base_url,
         timeout=float(config.llm.api.timeout), max_retries=int(config.llm.api.max_retries),
     )
-    clusterer = TopicClusterer(openai_client, config.llm)
+    # Move to the configured fallback model after one clustering timeout.
+    clusterer = TopicClusterer(openai_client.with_options(max_retries=0), config.llm)
     sent = 0
     with httpx.Client(timeout=45, follow_redirects=True) as http_client, openai_client:
         def summarize(url):
