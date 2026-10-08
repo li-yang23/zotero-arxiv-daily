@@ -123,6 +123,14 @@ def test_render_email_renders_fallback_group_without_summary(papers: list[Paper]
     assert "None" not in email_content
 
 
+def test_render_email_distinguishes_unidentified_and_unprocessed_affiliations(papers):
+    papers[0].affiliations = []
+    papers[1].affiliations = None
+    html = render_email([PaperGroup("Topic", None, papers[:2])], "Chinese")
+    assert "正文中未识别到作者机构" in html
+    assert "未知机构" in html
+
+
 def test_render_email_renders_quality_review(papers: list[Paper]):
     papers[0].quality_review = QualityReview(
         problem="The paper studies robust tuning.",

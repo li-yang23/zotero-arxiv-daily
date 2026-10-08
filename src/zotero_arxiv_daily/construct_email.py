@@ -22,6 +22,7 @@ def _email_labels(language: str | None) -> dict[str, str]:
             "empty": "今天没有新论文，可以休息一下。",
             "unsubscribe": "如需退订，请从 GitHub Action 设置中移除你的邮箱。",
             "affiliation_unknown": "未知机构",
+            "affiliation_not_found": "正文中未识别到作者机构",
             "relevance": "相关度",
             "tldr": "论文总结",
             "quality": "质量评分",
@@ -39,6 +40,7 @@ def _email_labels(language: str | None) -> dict[str, str]:
         "empty": "No Papers Today. Take a Rest!",
         "unsubscribe": "To unsubscribe, remove your email in your Github Action setting.",
         "affiliation_unknown": "Unknown Affiliation",
+        "affiliation_not_found": "No author affiliation identified in the paper text",
         "relevance": "Relevance",
         "tldr": "TLDR",
         "quality": "Quality",
@@ -211,7 +213,9 @@ def _render_paper_html(paper: Paper, labels: dict[str, str]) -> str:
         authors = ', '.join(author_list)
     else:
         authors = ', '.join(author_list[:3] + ['...'] + author_list[-2:])
-    if paper.affiliations is not None:
+    if paper.affiliations == []:
+        affiliations = labels["affiliation_not_found"]
+    elif paper.affiliations is not None:
         affiliations = paper.affiliations[:5]
         affiliations = ', '.join(affiliations)
         if len(paper.affiliations) > 5:

@@ -29,6 +29,16 @@ def replay_setup(monkeypatch):
     monkeypatch.setattr(replay_module, "fetch_paper", lambda url, client: Paper(
         source="arxiv", title=url, authors=[], abstract="Original abstract", url=url,
     ))
+    def score(config, papers):
+        for paper in papers:
+            paper.score = 7.5
+    monkeypatch.setattr(replay_module, "score_papers", score)
+    monkeypatch.setattr(replay_module, "fetch_affiliation_text", lambda paper, client: "Author, Test University")
+    def affiliations(paper, client, params, *, strict=False):
+        assert strict
+        paper.affiliations = ["Test University"]
+        return paper.affiliations
+    monkeypatch.setattr(Paper, "generate_affiliations", affiliations)
     def generate(paper, client, params, *, strict=False):
         assert strict
         paper.tldr = "A regenerated summary."
@@ -48,6 +58,10 @@ def test_replay_preserves_email_date_papers_and_skips_delivered(config, tmp_path
     assert headers["subject"] == "Daily arXiv 2026/09/29 [revised]"
     assert html.count("A regenerated summary.") == 2
     assert "<details>" not in html
+    assert html.count("Test University") == 2
+    assert html.count("7.5") == 2
+    assert "Unknown Affiliation" not in html
+    assert "未计算" not in html
     assert html.index(entries[0]["urls"][0]) < html.index(entries[0]["urls"][1])
 
 
@@ -72,7 +86,7 @@ def test_replay_bounds_clustering_retries(config, tmp_path, replay_setup, monkey
     clusterer = MagicMock(wraps=replay_module.TopicClusterer)
     monkeypatch.setattr(replay_module, "TopicClusterer", clusterer)
     replay(config, validate_manifest(manifest()), tmp_path, send=False)
-    client.with_options.assert_called_once_with(max_retries=0)
+    client.with_options.assert_called_once_with(max_retries=0, timeout=60)
     assert clusterer.call_args.args[0] is client.with_options.return_value
 
 
@@ -86,6 +100,52 @@ def test_replay_stops_after_uncertain_delivery(config, tmp_path, replay_setup, m
     assert json.loads((tmp_path / "state.json").read_text())["emails"]["123"]["status"] == "sending"
     with pytest.raises(RuntimeError, match="Uncertain delivery"):
         replay(config, entries, tmp_path, send=True)
+    with pytest.raises(RuntimeError, match="Uncertain delivery"):
+        replay(config, entries, tmp_path, send=True, revision="metadata-v2")
+
+
+def test_replay_upgrades_legacy_delivery_without_regenerating_summaries(config, tmp_path, replay_setup, monkeypatch):
+    entries = validate_manifest(manifest())
+    replay(config, entries, tmp_path, send=True)
+    state_path = tmp_path / "state.json"
+    state = json.loads(state_path.read_text())
+    del state["emails"]["123"]["revision"]
+    for paper in state["papers"].values():
+        paper["score"] = None
+        paper["affiliations"] = None
+        paper["full_text"] = None
+    state_path.write_text(json.dumps(state))
+    def unexpected(*args, **kwargs):
+        raise AssertionError("Existing summary must be preserved")
+    monkeypatch.setattr(Paper, "generate_tldr", unexpected)
+    assert replay(config, entries, tmp_path, send=True, revision="metadata-v2") == 1
+    assert replay(config, entries, tmp_path, send=True, revision="metadata-v2") == 0
+    assert replay(config, entries, tmp_path, send=True) == 0
+    assert len(replay_setup) == 2
+    assert replay_setup[-1][1]["subject"].endswith("[metadata-v2]")
+    saved = json.loads(state_path.read_text())
+    assert saved["delivery_history"][0]["status"] == "sent"
+    assert all(paper["score"] == 7.5 and paper["affiliations"] for paper in saved["papers"].values())
+
+
+@pytest.mark.parametrize("missing", ["affiliations", "score"])
+def test_replay_blocks_missing_metadata(config, tmp_path, replay_setup, monkeypatch, missing):
+    if missing == "affiliations":
+        monkeypatch.setattr(Paper, "generate_affiliations", lambda *args, **kwargs: None)
+    else:
+        monkeypatch.setattr(replay_module, "score_papers", lambda *args: None)
+    with pytest.raises(ValueError, match="Missing"):
+        replay(config, validate_manifest(manifest()), tmp_path, send=True)
+    assert replay_setup == []
+
+
+def test_replay_blocks_pdf_failure(config, tmp_path, replay_setup, monkeypatch):
+    def fail(*args):
+        raise RuntimeError("PDF unavailable")
+    monkeypatch.setattr(replay_module, "fetch_affiliation_text", fail)
+    with pytest.raises(RuntimeError, match="PDF unavailable"):
+        replay(config, validate_manifest(manifest()), tmp_path, send=True)
+    assert replay_setup == []
 
 
 def test_manifest_rejects_untrusted_links_and_duplicate_runs():

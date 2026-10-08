@@ -6,6 +6,7 @@ from dataclasses import asdict
 from datetime import date
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -19,7 +20,8 @@ from openai import OpenAI
 from .construct_email import render_email
 from .paper_resolver import ScholarlyHTMLParser, extract_page_metadata
 from .protocol import Paper
-from .topic_clusterer import TopicClusterer
+from .replay_metadata import fetch_affiliation_text, score_papers
+from .topic_clusterer import PaperGroup, TopicClusterer
 from .utils import fetch_api_balance, send_email
 
 
@@ -76,36 +78,78 @@ def fetch_paper(url: str, client: httpx.Client) -> Paper:
     raise RuntimeError(f"Cannot retrieve {url}")
 
 
-def replay(config, entries, output_dir: Path, *, send: bool, workers: int = 8) -> int:
+def validate_complete_paper(paper: Paper) -> None:
+    if not isinstance(paper.tldr, str) or not paper.tldr.strip():
+        raise ValueError(f"Missing summary: {paper.url}")
+    if paper.score is None or not math.isfinite(float(paper.score)):
+        raise ValueError(f"Missing relevance score: {paper.url}")
+    if not isinstance(paper.affiliations, list) or any(
+        not isinstance(item, str) or not item.strip() for item in paper.affiliations
+    ):
+        raise ValueError(f"Missing affiliation extraction: {paper.url}")
+
+
+def replay(config, entries, output_dir: Path, *, send: bool, workers: int = 8, revision: str = "revised") -> int:
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", revision):
+        raise ValueError("Invalid delivery revision")
     state_path = output_dir / "state.json"
     state = json.loads(state_path.read_text()) if state_path.exists() else {"emails": {}, "papers": {}}
     summaries = state["papers"]
+    pending = []
+    for entry in entries:
+        run_id = str(entry["run_id"])
+        fingerprint = hashlib.sha256(json.dumps(entry, sort_keys=True).encode()).hexdigest()
+        previous = state["emails"].get(run_id, {})
+        if previous and previous.get("fingerprint") != fingerprint:
+            raise ValueError(f"Source manifest changed for run {run_id}")
+        if previous.get("status") == "sending":
+            raise RuntimeError(f"Uncertain delivery for run {run_id}; verify mailbox before retrying")
+        deliveries = [previous] + [
+            item for item in state.get("delivery_history", []) if item["run_id"] == run_id
+        ]
+        if any(item.get("status") == "sent" and item.get("revision", "revised") == revision for item in deliveries):
+            logger.info(f"Already sent {revision} digest {entry['date']} (source run {run_id})")
+            continue
+        pending.append((entry, fingerprint))
+    if not pending:
+        return 0
     openai_client = OpenAI(
         api_key=config.llm.api.key, base_url=config.llm.api.base_url,
         timeout=float(config.llm.api.timeout), max_retries=int(config.llm.api.max_retries),
     )
-    # Move to the configured fallback model after one clustering timeout.
-    clusterer = TopicClusterer(openai_client.with_options(max_retries=0), config.llm)
+    # Short extraction/classification calls should promptly use configured fallbacks.
+    metadata_client = openai_client.with_options(max_retries=0, timeout=min(60, float(config.llm.api.timeout)))
+    clusterer = TopicClusterer(metadata_client, config.llm)
     sent = 0
     with httpx.Client(timeout=45, follow_redirects=True) as http_client, openai_client:
+        unscored = []
+        urls = dict.fromkeys(url for entry, _ in pending for url in entry["urls"])
+        for url in urls:
+            paper = Paper(**summaries[url]) if url in summaries else fetch_paper(url, http_client)
+            summaries[url] = asdict(paper)
+            if paper.score is None:
+                unscored.append(paper)
+        if unscored:
+            score_papers(config, unscored)
+            for paper in unscored:
+                summaries[paper.url] = asdict(paper)
+            atomic_json(state_path, state)
+            logger.info(f"Computed Zotero relevance for {len(unscored)} papers")
+
         def summarize(url):
-            if url in summaries:
-                return Paper(**summaries[url])
-            paper = fetch_paper(url, http_client)
-            paper.generate_tldr(openai_client, config.llm, strict=True)
+            paper = Paper(**summaries[url])
+            if not paper.tldr:
+                paper.generate_tldr(openai_client, config.llm, strict=True)
+            if paper.affiliations is None:
+                if not paper.full_text:
+                    paper.full_text = fetch_affiliation_text(paper, http_client)
+                paper.generate_affiliations(metadata_client, config.llm, strict=True)
+            validate_complete_paper(paper)
             return paper
 
-        for entry in entries:
+        for entry, fingerprint in pending:
             run_id = str(entry["run_id"])
-            fingerprint = hashlib.sha256(json.dumps(entry, sort_keys=True).encode()).hexdigest()
             previous = state["emails"].get(run_id, {})
-            if previous and previous.get("fingerprint") != fingerprint:
-                raise ValueError(f"Source manifest changed for run {run_id}")
-            if previous.get("status") == "sent":
-                logger.info(f"Already sent corrected digest {entry['date']} (source run {run_id})")
-                continue
-            if previous.get("status") == "sending":
-                raise RuntimeError(f"Uncertain delivery for run {run_id}; verify mailbox before retrying")
 
             papers_by_url = {}
             # The first real summary checks API availability before starting the batch.
@@ -120,16 +164,26 @@ def replay(config, entries, output_dir: Path, *, send: bool, workers: int = 8) -
                     papers_by_url[paper.url] = paper
                     summaries[paper.url] = asdict(paper)
                     atomic_json(state_path, state)
-                    logger.info(f"Summarized {entry['date']}: {len(papers_by_url)}/{len(entry['urls'])}")
+                    logger.info(f"Completed summary and metadata {entry['date']}: {len(papers_by_url)}/{len(entry['urls'])}")
             papers = [papers_by_url[url] for url in entry["urls"]]
-            groups = clusterer.cluster_papers(papers)
+            saved_groups = state.setdefault("groups", {}).get(run_id)
+            if saved_groups:
+                groups = [PaperGroup(group["label"], group["summary"], [papers_by_url[url] for url in group["urls"]]) for group in saved_groups]
+            else:
+                groups = clusterer.cluster_papers(papers)
+                state["groups"][run_id] = [
+                    {"label": group.label, "summary": group.summary, "urls": [paper.url for paper in group.papers]}
+                    for group in groups
+                ]
             html = render_email(groups, config.llm.language, api_balance=fetch_api_balance(config))
             output_dir.mkdir(parents=True, exist_ok=True)
-            (output_dir / f"{entry['date']}-{run_id}.html").write_text(html, encoding="utf-8")
-            subject = f"Daily arXiv {entry['date'].replace('-', '/')} [revised]"
+            (output_dir / f"{entry['date']}-{run_id}-{revision}.html").write_text(html, encoding="utf-8")
+            subject = f"Daily arXiv {entry['date'].replace('-', '/')} [{revision}]"
+            if previous.get("status") == "sent":
+                state.setdefault("delivery_history", []).append({"run_id": run_id, **previous})
             state["emails"][run_id] = {
                 "date": entry["date"], "paper_count": len(papers), "fingerprint": fingerprint,
-                "status": "ready", "subject": subject,
+                "status": "ready", "subject": subject, "revision": revision,
             }
             atomic_json(state_path, state)
             if send:
@@ -148,13 +202,14 @@ def main():
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/digest-replay"))
     parser.add_argument("--send", action="store_true")
+    parser.add_argument("--revision", default="revised")
     args = parser.parse_args()
     raw = args.manifest.read_text() if args.manifest else os.environ["REPLAY_MANIFEST"]
     entries = validate_manifest(json.loads(raw))
     config_dir = Path(__file__).resolve().parents[2] / "config"
     with initialize_config_dir(version_base=None, config_dir=str(config_dir)):
         config = compose(config_name="default", overrides=["llm.language=Chinese"])
-    count = replay(config, entries, args.output_dir, send=args.send)
+    count = replay(config, entries, args.output_dir, send=args.send, revision=args.revision)
     logger.info(f"Replay complete: {count} revised email(s) accepted by SMTP")
 
 

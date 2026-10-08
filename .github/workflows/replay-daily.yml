@@ -14,6 +14,10 @@ on:
         description: Previous replay run whose checkpoint should be restored
         type: string
         required: false
+      revision:
+        description: Delivery revision; reuse it when resuming to avoid duplicate mail
+        type: string
+        default: revised
 
 concurrency:
   group: replay-daily-digests
@@ -40,6 +44,8 @@ jobs:
           github-token: ${{ github.token }}
       - name: Regenerate original paper lists
         env:
+          ZOTERO_ID: ${{ secrets.ZOTERO_ID }}
+          ZOTERO_KEY: ${{ secrets.ZOTERO_KEY }}
           SENDER: ${{ secrets.SENDER }}
           RECEIVER: ${{ secrets.RECEIVER }}
           SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
@@ -48,6 +54,7 @@ jobs:
           CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
           REPLAY_MANIFEST: ${{ inputs.manifest }}
           REPLAY_SEND: ${{ inputs.send }}
+          REPLAY_REVISION: ${{ inputs.revision }}
           API_BALANCE_ENABLED: ${{ vars.API_BALANCE_ENABLED }}
           API_BALANCE_ENDPOINT: ${{ secrets.API_BALANCE_ENDPOINT }}
           API_BALANCE_JSON_PATH: ${{ vars.API_BALANCE_JSON_PATH }}
@@ -58,7 +65,7 @@ jobs:
           fi
           args=()
           if [ "$REPLAY_SEND" = true ]; then args+=(--send); fi
-          uv run python -m zotero_arxiv_daily.replay_daily "${args[@]}"
+          uv run python -m zotero_arxiv_daily.replay_daily --revision "$REPLAY_REVISION" "${args[@]}"
       - name: Save generated digests and delivery checkpoint
         if: always()
         uses: actions/upload-artifact@v4

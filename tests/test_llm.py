@@ -154,3 +154,22 @@ def test_strict_summary_does_not_send_failure_placeholder(config, paper):
         paper.generate_tldr(FailingChatClient(), config.llm, strict=True)
     assert paper.tldr is None
     assert paper.detailed_summary is None
+
+
+@pytest.mark.parametrize("response", ["[null]", '[" "]', '[{"name":"University"}]', '"University"'])
+def test_strict_affiliations_reject_invalid_values(config, paper, response):
+    with pytest.raises(RuntimeError, match="Affiliation extraction failed"):
+        paper.generate_affiliations(FakeChatClient(response), config.llm, strict=True)
+    assert paper.affiliations is None
+
+
+def test_strict_affiliations_distinguishes_no_evidence_from_api_failure(config, paper):
+    assert paper.generate_affiliations(FakeChatClient("[]"), config.llm, strict=True) == []
+    paper.full_text = None
+    with pytest.raises(RuntimeError, match="Affiliation extraction failed"):
+        paper.generate_affiliations(FakeChatClient("[]"), config.llm, strict=True)
+
+
+def test_affiliations_preserves_author_order(config, paper):
+    result = paper.generate_affiliations(FakeChatClient('["University B", "University A", "University B"]'), config.llm)
+    assert result == ["University B", "University A"]
