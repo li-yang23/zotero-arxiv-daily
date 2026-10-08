@@ -40,7 +40,7 @@ jobs:
         with:
           name: digest-replay
           path: outputs/digest-replay
-          run-id: ${{ inputs.resume_run || github.run_id }}
+          run-id: ${{ github.run_attempt > 1 && github.run_id || inputs.resume_run }}
           github-token: ${{ github.token }}
       - name: Regenerate original paper lists
         env:
