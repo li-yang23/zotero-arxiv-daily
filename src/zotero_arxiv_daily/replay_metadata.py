@@ -1,6 +1,7 @@
 """Recover source-backed affiliations and the normal Zotero relevance scores."""
 
 import math
+from tempfile import NamedTemporaryFile
 from threading import Lock
 import time
 
@@ -11,7 +12,7 @@ from .protocol import Paper
 
 
 PDF_LOCK = Lock()
-MAX_PDF_BYTES = 50_000_000
+MAX_PDF_BYTES = 500_000_000
 
 
 def fetch_affiliation_text(paper: Paper, client: httpx.Client) -> str:
@@ -21,22 +22,26 @@ def fetch_affiliation_text(paper: Paper, client: httpx.Client) -> str:
     pdf_url = paper.url.replace("/abs/", "/pdf/")
     for attempt in range(3):
         try:
-            with client.stream("GET", pdf_url) as response:
-                response.raise_for_status()
-                content = bytearray()
-                for chunk in response.iter_bytes():
-                    content.extend(chunk)
-                    if len(content) > MAX_PDF_BYTES:
-                        raise ValueError(f"PDF exceeds size limit: {paper.url}")
-            if not content.startswith(b"%PDF"):
-                raise ValueError(f"Not a PDF: {paper.url}")
-            # PyMuPDF is not thread-safe; only downloads/LLM calls are concurrent.
-            with PDF_LOCK, pymupdf.open(stream=bytes(content), filetype="pdf") as document:
-                text = "\n".join(document[index].get_text(sort=True) for index in range(min(3, len(document))))
+            with NamedTemporaryFile(suffix=".pdf") as temporary:
+                size = 0
+                with client.stream("GET", pdf_url) as response:
+                    response.raise_for_status()
+                    for chunk in response.iter_bytes(chunk_size=65536):
+                        size += len(chunk)
+                        if size > MAX_PDF_BYTES:
+                            raise ValueError(f"PDF exceeds size limit: {paper.url}")
+                        temporary.write(chunk)
+                temporary.flush()
+                temporary.seek(0)
+                if temporary.read(5) != b"%PDF-":
+                    raise ValueError(f"Not a PDF: {paper.url}")
+                # PyMuPDF is not thread-safe; only downloads/LLM calls are concurrent.
+                with PDF_LOCK, pymupdf.open(temporary.name) as document:
+                    text = "\n".join(document[index].get_text(sort=True) for index in range(min(3, len(document))))
             if len(text.strip()) < 100:
                 raise ValueError(f"No usable author/front-matter text: {paper.url}")
             return text
-        except (httpx.HTTPError, ValueError):
+        except httpx.HTTPError:
             if attempt == 2:
                 raise
             time.sleep(3 * (attempt + 1))
