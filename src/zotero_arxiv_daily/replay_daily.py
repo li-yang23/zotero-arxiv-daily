@@ -76,7 +76,7 @@ def fetch_paper(url: str, client: httpx.Client) -> Paper:
     raise RuntimeError(f"Cannot retrieve {url}")
 
 
-def replay(config, entries, output_dir: Path, *, send: bool, workers: int = 4) -> int:
+def replay(config, entries, output_dir: Path, *, send: bool, workers: int = 8) -> int:
     state_path = output_dir / "state.json"
     state = json.loads(state_path.read_text()) if state_path.exists() else {"emails": {}, "papers": {}}
     summaries = state["papers"]
