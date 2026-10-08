@@ -118,8 +118,10 @@ def replay(config, entries, output_dir: Path, *, send: bool, workers: int = 8, r
         timeout=float(config.llm.api.timeout), max_retries=int(config.llm.api.max_retries),
     )
     # Short extraction/classification calls should promptly use configured fallbacks.
-    metadata_client = openai_client.with_options(max_retries=0, timeout=min(60, float(config.llm.api.timeout)))
-    clusterer = TopicClusterer(metadata_client, config.llm)
+    metadata_client = openai_client.with_options(max_retries=0)
+    clusterer = TopicClusterer(
+        metadata_client.with_options(timeout=min(60, float(config.llm.api.timeout))), config.llm,
+    )
     sent = 0
     with httpx.Client(timeout=45, follow_redirects=True) as http_client, openai_client:
         unscored = []
@@ -159,12 +161,23 @@ def replay(config, entries, output_dir: Path, *, send: bool, workers: int = 8, r
             atomic_json(state_path, state)
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 futures = {pool.submit(summarize, url): url for url in entry["urls"][1:]}
+                failed_urls = []
                 for future in as_completed(futures):
-                    paper = future.result()
+                    try:
+                        paper = future.result()
+                    except Exception as exc:
+                        failed_urls.append(futures[future])
+                        logger.warning(f"Will retry metadata after saving other completed papers: {exc}")
+                        continue
                     papers_by_url[paper.url] = paper
                     summaries[paper.url] = asdict(paper)
                     atomic_json(state_path, state)
                     logger.info(f"Completed summary and metadata {entry['date']}: {len(papers_by_url)}/{len(entry['urls'])}")
+            for url in failed_urls:
+                paper = summarize(url)
+                papers_by_url[paper.url] = paper
+                summaries[paper.url] = asdict(paper)
+                atomic_json(state_path, state)
             papers = [papers_by_url[url] for url in entry["urls"]]
             saved_groups = state.setdefault("groups", {}).get(run_id)
             if saved_groups:

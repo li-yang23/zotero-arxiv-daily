@@ -86,8 +86,9 @@ def test_replay_bounds_clustering_retries(config, tmp_path, replay_setup, monkey
     clusterer = MagicMock(wraps=replay_module.TopicClusterer)
     monkeypatch.setattr(replay_module, "TopicClusterer", clusterer)
     replay(config, validate_manifest(manifest()), tmp_path, send=False)
-    client.with_options.assert_called_once_with(max_retries=0, timeout=60)
-    assert clusterer.call_args.args[0] is client.with_options.return_value
+    client.with_options.assert_called_once_with(max_retries=0)
+    client.with_options.return_value.with_options.assert_called_once_with(timeout=60)
+    assert clusterer.call_args.args[0] is client.with_options.return_value.with_options.return_value
 
 
 def test_replay_stops_after_uncertain_delivery(config, tmp_path, replay_setup, monkeypatch):
@@ -146,6 +147,21 @@ def test_replay_blocks_pdf_failure(config, tmp_path, replay_setup, monkeypatch):
     with pytest.raises(RuntimeError, match="PDF unavailable"):
         replay(config, validate_manifest(manifest()), tmp_path, send=True)
     assert replay_setup == []
+
+
+def test_replay_retries_failed_paper_without_discarding_other_results(config, tmp_path, replay_setup, monkeypatch):
+    original = Paper.generate_affiliations
+    attempts = []
+    def flaky(paper, *args, **kwargs):
+        if paper.url.endswith("12346"):
+            attempts.append(paper.url)
+            if len(attempts) == 1:
+                raise RuntimeError("Temporary model timeout")
+        return original(paper, *args, **kwargs)
+    monkeypatch.setattr(Paper, "generate_affiliations", flaky)
+    assert replay(config, validate_manifest(manifest()), tmp_path, send=True) == 1
+    assert len(attempts) == 2
+    assert len(replay_setup) == 1
 
 
 def test_manifest_rejects_untrusted_links_and_duplicate_runs():

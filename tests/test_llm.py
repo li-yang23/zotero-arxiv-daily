@@ -173,3 +173,9 @@ def test_strict_affiliations_distinguishes_no_evidence_from_api_failure(config, 
 def test_affiliations_preserves_author_order(config, paper):
     result = paper.generate_affiliations(FakeChatClient('["University B", "University A", "University B"]'), config.llm)
     assert result == ["University B", "University A"]
+
+
+def test_affiliations_uses_structured_json_and_preserves_brackets(config, paper):
+    client = FakeChatClient('{"affiliations": ["Institute [Lab]", "University B"]}')
+    assert paper.generate_affiliations(client, config.llm, strict=True) == ["Institute [Lab]", "University B"]
+    assert client.requests[0]["response_format"] == {"type": "json_object"}
