@@ -1,0 +1,52 @@
+name: Check summary API
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Configured summary model to check
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check one small completion without sending email
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
+          CHECK_MODEL: ${{ inputs.model }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+          request = urllib.request.Request(
+              os.environ['OPENAI_API_BASE'].rstrip('/') + '/chat/completions',
+              data=json.dumps({
+                  'model': os.environ['CHECK_MODEL'],
+                  'messages': [{'role': 'user', 'content': 'Reply OK.'}],
+                  'max_tokens': 16,
+              }).encode(),
+              headers={
+                  'Authorization': 'Bearer ' + os.environ['OPENAI_API_KEY'],
+                  'Content-Type': 'application/json',
+              },
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  print('Summary API HTTP status:', response.status)
+          except urllib.error.HTTPError as exc:
+              body = json.loads(exc.read())
+              print('Summary API HTTP status:', exc.code)
+              print('Provider message:', body.get('message') or body.get('error', {}).get('message'))
+              raise SystemExit(1)
+          except Exception as exc:
+              print('Summary API connection failed:', type(exc).__name__)
+              raise SystemExit(1)
+          PY
