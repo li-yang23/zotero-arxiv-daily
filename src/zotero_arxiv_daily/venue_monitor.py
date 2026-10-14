@@ -172,12 +172,13 @@ class VenueMonitor:
                     state["papers"][key] = record
                 state["venues"][venue.name] = {"last_success": today.isoformat(), "count": len(papers), "feed_revision": 2}
                 report["venues"][venue.name] = {"status": "ok", "fetched": len(papers), "new": new}
-                self.store.save(state)
             except Exception as exc:
                 message = f"{venue.name}: {type(exc).__name__}: {exc}"
                 report["venues"][venue.name] = {"status": "failed", "error": message}
                 report["errors"].append(message)
                 logger.error(message)
+        # Commit discovery as one checkpoint; persistence errors are not source failures.
+        self.store.save(state)
 
         if not discover_only:
             pending = [(key, record) for key, record in state["papers"].items()

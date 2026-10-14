@@ -293,3 +293,31 @@ def test_missing_github_file_on_existing_branch_is_fatal():
     store = GitHubStateStore(httpx.Client(transport=httpx.MockTransport(handler)), "owner/repo")
     with pytest.raises(httpx.HTTPStatusError):
         store.load()
+
+
+def test_transient_github_conflict_retries_only_unchanged_state(monkeypatch):
+    monkeypatch.setattr("zotero_arxiv_daily.venue_state.sleep", lambda _: None)
+    writes = []
+    def handler(request):
+        if request.method == "GET":
+            return httpx.Response(200, json={"sha": "original"})
+        writes.append(request)
+        return httpx.Response(409) if len(writes) == 1 else httpx.Response(200, json={"content": {"sha": "new"}})
+    store = GitHubStateStore(httpx.Client(transport=httpx.MockTransport(handler)), "owner/repo")
+    store.sha = "original"
+    store.save({"test": True})
+    assert store.sha == "new" and len(writes) == 2
+
+
+def test_real_github_conflict_never_overwrites_another_writer():
+    writes = []
+    def handler(request):
+        if request.method == "GET":
+            return httpx.Response(200, json={"sha": "another-writer"})
+        writes.append(request)
+        return httpx.Response(409)
+    store = GitHubStateStore(httpx.Client(transport=httpx.MockTransport(handler)), "owner/repo")
+    store.sha = "original"
+    with pytest.raises(httpx.HTTPStatusError):
+        store.save({"test": True})
+    assert len(writes) == 1

@@ -2,8 +2,12 @@
 
 import base64
 import json
+import hashlib
 from pathlib import Path
+from time import sleep
 from urllib.parse import quote
+
+import httpx
 
 
 def empty_state():
@@ -68,13 +72,27 @@ class GitHubStateStore:
         return validate_state(json.loads(base64.b64decode(payload["content"])))
 
     def save(self, state):
+        content = json.dumps(state, ensure_ascii=False).encode()
         body = {
             "message": "Update daily venue monitor delivery state",
             "branch": self.BRANCH,
-            "content": base64.b64encode(json.dumps(state, ensure_ascii=False).encode()).decode(),
+            "content": base64.b64encode(content).decode(),
         }
         if self.sha:
             body["sha"] = self.sha
-        # No blind retry on an ambiguous write or SHA conflict, especially before SMTP.
-        payload = self.request("PUT", f"/contents/{self.FILE}", json=body)
-        self.sha = payload["content"]["sha"]
+        desired_sha = hashlib.sha1(f"blob {len(content)}\0".encode() + content).hexdigest()
+        for attempt in range(3):
+            try:
+                payload = self.request("PUT", f"/contents/{self.FILE}", json=body)
+                self.sha = payload["content"]["sha"]
+                return
+            except httpx.HTTPError as exc:
+                if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code not in {409, 500, 502, 503, 504}:
+                    raise
+                current = self.request("GET", f"/contents/{self.FILE}", params={"ref": self.BRANCH})
+                if current["sha"] == desired_sha:
+                    self.sha = desired_sha  # The ambiguous write actually committed exactly our content.
+                    return
+                if current["sha"] != self.sha or attempt == 2:
+                    raise  # Never overwrite another writer's delivery history.
+                sleep(2 ** attempt)
