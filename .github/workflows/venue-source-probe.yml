@@ -1,0 +1,19 @@
+name: Diagnose public venue sources
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - run: uv run python scripts/probe_venue_sources.py
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: venue-source-probe
+          path: outputs/venue-source-probe/
+          retention-days: 7
