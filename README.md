@@ -111,10 +111,55 @@ source:
 
 executor:
   debug: ${oc.env:DEBUG,null}
-  source: ['arxiv', 'top_venue']
+  source: ['arxiv']
 ```
 >[!NOTE]
 > `${oc.env:XXX,yyy}` means the value of the environment variable `XXX`. If the variable is not set, the default value `yyy` will be used.
+
+### Daily Conference and Journal Digests
+
+The daily workflow has an independent `monitor-venues` job. It checks all 14 venues every day,
+even when `CUSTOM_CONFIG` sets `executor.source: [arxiv]` or the arXiv/Zotero job fails.
+The existing schedule is 23:00 UTC (07:00 Asia/Shanghai the next day); GitHub can delay scheduled jobs.
+Relevant papers are sent separately with the subject `[顶会顶刊安全专题]`, grouped by venue and
+security topic. They do not compete with the arXiv top-25 quota or its quality filter.
+
+- ICLR, ICML and NeurIPS: OpenReview's exact accepted-venue IDs, with paginated DBLP proceedings as a fallback.
+- NDSS, USENIX Security, S&P and CCS: exact DBLP publication streams, not fuzzy venue-name searches.
+- TIFS, TDSC, PAMI, Artificial Intelligence, Nature and Science: Crossref journal ISSNs, fully paginated.
+- JMLR: its official annual volume directory (not dependent on DOI coverage).
+
+The first run checks the current conference/JMLR year and the preceding year during January-March,
+plus the latest 90 publication days for other journals. Later journal runs check index changes with
+a three-day overlap, so delayed deposits are not restricted to yesterday's publication date.
+Conference directories are checked again every day. DBLP/Crossref indexing can lag official publication;
+this is daily checking of those feeds, not a guarantee of same-day coverage of every publisher release.
+
+Screening uses model/security keyword prefilters followed by an LLM relevance decision and a concise,
+source-grounded Chinese summary. When an abstract is missing, a broader title prefilter selects metadata
+enrichment candidates; absent keywords or unpublished metadata can still cause omissions. Missing
+abstracts and API failures stay pending and are retried, never replaced with invented summaries.
+The topic score is explicitly distinct from Zotero similarity. Institutions are shown only when the
+publisher metadata supplies them. No full-analysis section is added; the configured API-balance footer
+is reused. By default up to 40 candidates are processed per run, round-robin across venues; excess stays
+queued for subsequent runs rather than being dropped.
+
+Delivery history and pending work live in `venue-monitor-state.json` on the separate
+`codex/venue-monitor-state` branch. This contains public paper metadata and delivery status only,
+not credentials or Zotero contents. Do not delete/reset this branch: it prevents duplicate mail.
+The job requires `contents: write` and is concurrency-locked. It records a `sending` entry before SMTP
+and `sent` after SMTP accepts the mail. An interrupted/ambiguous SMTP attempt is held for manual
+verification: after checking the receiver mailbox, update that delivery and its paper statuses to
+`sent`, or remove only the unsent delivery entry to let its `ready` papers retry. It never blindly resends.
+Source failures are reported separately from zero results and do not advance the affected watermark.
+Every run publishes a per-venue report in the Actions summary and a `venue-monitor-report-*` artifact.
+
+To validate sources without sending email, manually run **Send emails daily** with `venue_only` and
+`discover_only` both enabled. To process and send queued papers, keep `venue_only` enabled and disable
+`discover_only`. Local execution uses `python -m zotero_arxiv_daily.venue_main`; override
+`venue_monitor.discover_only=true` for discovery only. Defaults are under `venue_monitor` in
+`config/base.yaml`. The legacy `source.top_venue` OpenAlex retriever remains available for compatibility
+but is excluded from the ordinary daily job to prevent duplicate delivery.
 
 Here is the full configuration, `???` means the value must be filled in:
 ```yaml

@@ -1,11 +1,21 @@
 name: Send emails daily
 on:
   workflow_dispatch:
+    inputs:
+      venue_only:
+        description: Run only the independent venue monitor
+        type: boolean
+        default: false
+      discover_only:
+        description: Check venue feeds without LLM calls or sending mail
+        type: boolean
+        default: false
   schedule:
     - cron: '0 23 * * *'
 
 jobs:
   calculate-and-send:
+    if: ${{ !inputs.venue_only }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,6 +44,43 @@ jobs:
           CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
         run: |
           printf "%b\n" "$CUSTOM_CONFIG" > config/custom.yaml
-          echo "Use custom config: "
-          cat config/custom.yaml
-          uv run src/zotero_arxiv_daily/main.py llm.language=Chinese executor.max_paper_num=25
+          uv run src/zotero_arxiv_daily/main.py llm.language=Chinese executor.max_paper_num=25 executor.separate_venue_monitor=true
+
+  monitor-venues:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    concurrency:
+      group: venue-monitor
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - name: Check all venues and send thematic digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SENDER: ${{ secrets.SENDER }}
+          RECEIVER: ${{ secrets.RECEIVER }}
+          SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
+          API_BALANCE_ENABLED: ${{ vars.API_BALANCE_ENABLED }}
+          API_BALANCE_ENDPOINT: ${{ secrets.API_BALANCE_ENDPOINT }}
+          API_BALANCE_JSON_PATH: ${{ vars.API_BALANCE_JSON_PATH }}
+          API_BALANCE_CURRENCY: ${{ vars.API_BALANCE_CURRENCY }}
+          CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
+          DISCOVER_ONLY: ${{ inputs.discover_only || false }}
+        run: |
+          if [ -n "$CUSTOM_CONFIG" ]; then
+            printf "%b\n" "$CUSTOM_CONFIG" > config/custom.yaml
+          fi
+          uv run python -m zotero_arxiv_daily.venue_main venue_monitor.state_backend=github "venue_monitor.discover_only=$DISCOVER_ONLY"
+      - name: Save venue check report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: venue-monitor-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: outputs/venue-monitor/
+          if-no-files-found: warn
+          retention-days: 90

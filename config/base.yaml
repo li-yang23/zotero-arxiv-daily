@@ -39,6 +39,14 @@ source:
     request_delay_seconds: 0.2 # Delay between OpenAlex venue queries. Example: 0.2
     mailto: null # Optional contact email for OpenAlex polite pool. Example: abc@example.com
 
+venue_monitor:
+  bootstrap_days: 90 # Initial journal publication window; subsequent checks use index dates with overlap.
+  max_reviews_per_run: 40 # Excess candidates stay queued, independently of the arXiv top-N limit.
+  state_backend: local # Daily Actions overrides this to github for durable delivery history.
+  state_file: outputs/venue-monitor/state.json
+  output_dir: outputs/venue-monitor
+  discover_only: false # Check all feeds and save candidates without LLM calls or email.
+
 email:
   sender: ??? # The email account of the SMTP server that sends you email. Example: abc@qq.com
   receiver: ??? # The email account that receives the paper list. Example: abc@outlook.com
@@ -119,6 +127,7 @@ quality_filter:
   candidate_multiplier: 3 # Review this many times max_paper_num after relevance reranking. Example: 3
 
 executor:
+  separate_venue_monitor: false # Daily workflow runs top venues in an independent job.
   debug: false # Whether to use debug mode. Example: true
   send_empty: false # Whether to send an empty email even if no new papers today. Example: true
   max_workers: 4 # Concurrent workers for processing papers. Example: 4

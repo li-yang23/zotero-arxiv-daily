@@ -28,6 +28,8 @@ def main(config:DictConfig):
     if config.executor.debug:
         logger.info("Debug mode is enabled")
     
+    if config.executor.separate_venue_monitor:
+        config.executor.source = [source for source in config.executor.source if source != "top_venue"]
     executor = Executor(config)
     executor.run()
 
