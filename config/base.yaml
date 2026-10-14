@@ -40,7 +40,7 @@ source:
     mailto: null # Optional contact email for OpenAlex polite pool. Example: abc@example.com
 
 venue_monitor:
-  bootstrap_days: 90 # Initial journal publication window; subsequent checks use index dates with overlap.
+  bootstrap_days: 90 # Initial journal index-update window; subsequent checks overlap by three days.
   max_reviews_per_run: 40 # Excess candidates stay queued, independently of the arXiv top-N limit.
   state_backend: local # Daily Actions overrides this to github for durable delivery history.
   state_file: outputs/venue-monitor/state.json

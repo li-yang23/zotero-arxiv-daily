@@ -183,7 +183,7 @@ def test_openreview_only_accepts_exact_venue_and_paginates():
             "venueid": {"value": ids[offset]}, "title": {"value": "Privacy of LLM"},
             "abstract": {"value": ABSTRACT}, "authors": {"value": ["Author"]},
         }}]})
-    papers = source_with(handler).fetch(VENUES[0], TODAY)
+    papers = source_with(handler).openreview(VENUES[0], 2026)
     assert len(calls) == 2 and len(papers) == 1
     assert papers[0].abstract == ABSTRACT
 
@@ -197,7 +197,7 @@ def test_dblp_exact_stream_year_and_paginated_results():
             "key": key, "year": "2026", "title": "Privacy of LLM", "type": "Conference and Workshop Papers",
             "authors": {"author": {"text": "Author"}}, "ee": "https://doi.org/10.1/test",
         }}]}}})
-    papers = source_with(handler).fetch(VENUES[3], TODAY)
+    papers = source_with(handler).dblp(VENUES[3], 2026)
     assert len(papers) == 1 and papers[0].doi == "10.1/test"
 
 
@@ -210,7 +210,8 @@ def test_crossref_first_window_then_overlapping_index_window_and_pagination():
         return httpx.Response(200, json={"message": {"items": items, "next-cursor": "next"}})
     source = source_with(handler)
     assert len(source.fetch(VENUES[7], TODAY)) == 200
-    assert "from-pub-date:2026-07-16" in requests[0].url.params["filter"]
+    assert "from-index-date:2026-07-16" in requests[0].url.params["filter"]
+    assert "from-pub-date:2026-01-01" in requests[0].url.params["filter"]
     source.fetch(VENUES[7], TODAY, "2026-10-13")
     assert "from-index-date:2026-10-10" in requests[2].url.params["filter"]
     assert "until-index-date:2026-10-14" in requests[2].url.params["filter"]
@@ -218,12 +219,54 @@ def test_crossref_first_window_then_overlapping_index_window_and_pagination():
 
 def test_jmlr_uses_paper_title_not_abs_label():
     source = source_with(lambda _: httpx.Response(200, text='''
-      <p class="title">Private Language Models</p><p class="details">Author
-      <a href="/papers/v27/25-1234.html">[abs]</a><a href="x.pdf">[pdf]</a></p>
+      <dl><dt>Private Language Models</dt><dd>Author
+      <a href="/papers/v27/25-1234.html">[abs]</a><a href="x.pdf">[pdf]</a></dd></dl>
     '''))
     papers = source.fetch(VENUES[10], TODAY)
     assert len(papers) == 1
     assert papers[0].title == "Private Language Models"
+
+
+def test_official_ai_export_joins_abstracts_and_institutions():
+    def handler(request):
+        if request.url.path.endswith("abstracts.json"):
+            return httpx.Response(200, json={"123": ABSTRACT})
+        return httpx.Response(200, json={"count": 1, "next": None, "results": [{
+            "id": 123, "name": "LLM privacy", "decision": "Accept (Poster)",
+            "virtualsite_url": "/virtual/2026/poster/123", "authors": [
+                {"fullname": "Author", "institution": "Example University"}],
+        }]})
+    p = source_with(handler).fetch(VENUES[0], TODAY)[0]
+    assert p.abstract == ABSTRACT and p.affiliations == ["Example University"]
+    assert p.url == "https://iclr.cc/virtual/2026/poster/123"
+
+
+def test_official_security_directories():
+    pages = {
+        "www.ndss-symposium.org": '<div class="pt-cv-content-item"><h2 class="pt-cv-title"><a href="/ndss-paper/test">LLM privacy</a></h2><div class="pt-cv-ctf-display_authors">Alice (Example University)</div></div>',
+        "www.sigsac.org": '<table><tr><th>Title</th><th>Author</th></tr><tr><td>LLM privacy</td><td>Alice (Example University)</td></tr></table>',
+        "www.ieee-security.org": '<div class="list-group-item"><b><a data-toggle="collapse" href="#paper">LLM privacy</a></b><div class="authorlist">Alice<sup>1</sup>, Bob<sup>1</sup><br/><sup>1</sup>: Example University</div></div>',
+    }
+    source = source_with(lambda request: httpx.Response(200, text=pages[request.url.host]))
+    for index in (3, 5, 6):
+        papers = source.fetch(VENUES[index], TODAY)
+        assert len(papers) == 1 and papers[0].title == "LLM privacy"
+        assert "Example University" in papers[0].affiliations[0]
+    assert source.fetch(VENUES[5], TODAY)[0].authors == ["Alice, Bob"]
+
+
+def test_usenix_fallback_reports_degraded_coverage_and_paginates():
+    def handler(request):
+        if request.url.host == "www.usenix.org":
+            return httpx.Response(403)
+        token = request.url.params.get("token")
+        return httpx.Response(200, json={"token": None if token else "next", "data": [{
+            "paperId": token or "first", "title": "LLM privacy", "venue": "USENIX Security Symposium",
+            "abstract": ABSTRACT, "url": "https://www.semanticscholar.org/paper/test", "authors": [],
+        }]})
+    source = source_with(handler)
+    assert len(source.fetch(VENUES[4], TODAY)) == 2
+    assert "Semantic Scholar" in source.warnings[0]
 
 
 def test_corrupt_local_state_never_resets(tmp_path):

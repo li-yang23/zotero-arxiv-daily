@@ -124,15 +124,17 @@ The existing schedule is 23:00 UTC (07:00 Asia/Shanghai the next day); GitHub ca
 Relevant papers are sent separately with the subject `[顶会顶刊安全专题]`, grouped by venue and
 security topic. They do not compete with the arXiv top-25 quota or its quality filter.
 
-- ICLR, ICML and NeurIPS: OpenReview's exact accepted-venue IDs, with paginated DBLP proceedings as a fallback.
-- NDSS, USENIX Security, S&P and CCS: exact DBLP publication streams, not fuzzy venue-name searches.
+- ICLR, ICML and NeurIPS: official conference paper/abstract exports, with exact OpenReview accepted-venue IDs as fallback.
+- NDSS, S&P and CCS: official accepted-paper directories, including author/affiliation metadata.
+- USENIX Security: official technical sessions, with paginated Semantic Scholar venue/year search as fallback.
 - TIFS, TDSC, PAMI, Artificial Intelligence, Nature and Science: Crossref journal ISSNs, fully paginated.
 - JMLR: its official annual volume directory (not dependent on DOI coverage).
 
 The first run checks the current conference/JMLR year and the preceding year during January-March,
-plus the latest 90 publication days for other journals. Later journal runs check index changes with
-a three-day overlap, so delayed deposits are not restricted to yesterday's publication date.
-Conference directories are checked again every day. DBLP/Crossref indexing can lag official publication;
+plus the latest 90 days of index changes for other journals (limited to recent publication years).
+Index dates also cover continuous-volume journals such as TIFS, whose publication metadata may contain
+only a year. Later journal runs use a three-day overlap, so delayed deposits are not restricted to
+yesterday's publication date. Conference directories are checked again every day. Crossref/Semantic Scholar indexing can lag official publication;
 this is daily checking of those feeds, not a guarantee of same-day coverage of every publisher release.
 
 Screening uses model/security keyword prefilters followed by an LLM relevance decision and a concise,

@@ -9,6 +9,7 @@ from time import sleep
 from urllib.parse import quote, urljoin, urlparse
 
 import httpx
+from bs4 import BeautifulSoup
 
 
 @dataclass(frozen=True)
@@ -19,13 +20,13 @@ class Venue:
 
 
 VENUES = (
-    Venue("ICLR", "openreview", "ICLR.cc/{year}/Conference"),
-    Venue("ICML", "openreview", "ICML.cc/{year}/Conference"),
-    Venue("NeurIPS", "openreview", "NeurIPS.cc/{year}/Conference"),
-    Venue("NDSS", "dblp", "conf/ndss"),
-    Venue("USENIX Security", "dblp", "conf/uss"),
-    Venue("S&P", "dblp", "conf/sp"),
-    Venue("CCS", "dblp", "conf/ccs"),
+    Venue("ICLR", "conference", "ICLR.cc/{year}/Conference"),
+    Venue("ICML", "conference", "ICML.cc/{year}/Conference"),
+    Venue("NeurIPS", "conference", "NeurIPS.cc/{year}/Conference"),
+    Venue("NDSS", "conference", "conf/ndss"),
+    Venue("USENIX Security", "conference", "conf/uss"),
+    Venue("S&P", "conference", "conf/sp"),
+    Venue("CCS", "conference", "conf/ccs"),
     Venue("TIFS", "crossref", "1556-6013"),
     Venue("TDSC", "crossref", "1545-5971"),
     Venue("PAMI", "crossref", "0162-8828"),
@@ -85,7 +86,7 @@ class Links(HTMLParser):
         self.title_parts = []
 
     def handle_starttag(self, tag, attrs):
-        if tag == "p" and "title" in dict(attrs).get("class", "").split():
+        if tag == "dt" or (tag == "p" and "title" in dict(attrs).get("class", "").split()):
             self.in_title = True
             self.title_parts = []
         if tag == "a":
@@ -99,7 +100,7 @@ class Links(HTMLParser):
             self.parts.append(data)
 
     def handle_endtag(self, tag):
-        if tag == "p" and self.in_title:
+        if tag in {"p", "dt"} and self.in_title:
             self.title = plain(" ".join(self.title_parts))
             self.in_title = False
         if tag == "a" and self.href:
@@ -112,7 +113,8 @@ class VenueSources:
     ALLOWED_HOSTS = ("openreview.net", "dblp.org", "dblp.uni-trier.de", "crossref.org", "doi.org",
                      "jmlr.org", "ndss-symposium.org", "usenix.org", "ieee.org", "ieee-security.org",
                      "acm.org", "nature.com", "science.org", "sciencedirect.com", "elsevier.com",
-                     "proceedings.mlr.press", "papers.nips.cc", "papers.neurips.cc")
+                     "proceedings.mlr.press", "papers.nips.cc", "papers.neurips.cc", "iclr.cc",
+                     "icml.cc", "neurips.cc", "sigsac.org", "semanticscholar.org")
 
     def __init__(self, client, *, lookback_days=90, delay=0.3):
         self.client = client
@@ -148,6 +150,11 @@ class VenueSources:
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code not in {429, 500, 502, 503, 504} or attempt == 2:
                     raise
+                if exc.response.status_code == 429:
+                    retry_after = exc.response.headers.get("retry-after", "60")
+                    if not retry_after.isdigit() or int(retry_after) > 60:
+                        raise
+                    sleep(int(retry_after))
             sleep(2 ** attempt)
         raise RuntimeError("Metadata request exhausted retries")
 
@@ -158,17 +165,138 @@ class VenueSources:
         years = [today.year - 1, today.year] if today.month <= 3 else [today.year]
         papers = []
         for year in years:
+            papers.extend(getattr(self, venue.provider)(venue, year))
+        return papers
+
+    def conference(self, venue, year):
+        if venue.name in {"ICLR", "ICML", "NeurIPS"}:
             try:
-                papers.extend(getattr(self, venue.provider)(venue, year))
-            except httpx.HTTPError as exc:
-                streams = {"ICLR": "conf/iclr", "ICML": "conf/icml", "NeurIPS": "conf/nips"}
-                if venue.provider != "openreview":
-                    raise
-                fallback = self.dblp(Venue(venue.name, "dblp", streams[venue.name]), year)
-                if not fallback:
-                    raise ValueError(f"OpenReview unavailable and DBLP has no {venue.name} {year} papers") from exc
-                self.warnings.append(f"{venue.name} {year}: OpenReview 不可用，已改查 DBLP；收录可能延迟。")
-                papers.extend(fallback)
+                return self.virtual_conference(venue, year)
+            except (httpx.HTTPError, ValueError, KeyError):
+                papers = self.openreview(venue, year)
+                self.warnings.append(f"{venue.name}: 官方目录不可用，已改查 OpenReview 录用列表。")
+                return papers
+        urls = {
+            "NDSS": f"https://www.ndss-symposium.org/ndss{year}/accepted-papers/",
+            "USENIX Security": f"https://www.usenix.org/conference/usenixsecurity{year % 100:02d}/technical-sessions",
+            "S&P": f"https://www.ieee-security.org/TC/SP{year}/accepted-papers.html",
+            "CCS": f"https://www.sigsac.org/ccs/CCS{year}/program/accepted-papers.html",
+        }
+        url = urls[venue.name]
+        try:
+            soup = BeautifulSoup(self.get(url).text, "html.parser")
+        except httpx.HTTPError:
+            if venue.name != "USENIX Security":
+                raise
+            papers = self.semantic_scholar(venue, year)
+            if not papers:
+                raise ValueError("USENIX 官方目录不可用，备用索引尚无当年论文")
+            self.warnings.append("USENIX Security: 官方站限制访问，已使用 Semantic Scholar；收录可能延迟。")
+            return papers
+        papers = []
+        if venue.name == "NDSS":
+            for entry in soup.select(".pt-cv-content-item"):
+                title = entry.select_one(".pt-cv-title a")
+                if title:
+                    text = entry.select_one(".pt-cv-ctf-display_authors")
+                    authors, institutions = split_authors(text.get_text(" ", strip=True) if text else "")
+                    link = urljoin(url, title["href"])
+                    papers.append(VenuePaper(venue.name, link, title.get_text(" ", strip=True), link,
+                                              authors=authors, affiliations=institutions, published=str(year)))
+        elif venue.name == "CCS":
+            for index, row in enumerate(soup.select("table tr")):
+                cells = row.find_all("td", recursive=False)
+                if len(cells) != 2:
+                    continue
+                title = cells[0].get_text(" ", strip=True)
+                authors, institutions = split_authors(cells[1].get_text("; ", strip=True))
+                papers.append(VenuePaper(venue.name, f"{year}:{title}", title, url,
+                                          authors=authors, affiliations=institutions, published=str(year)))
+        elif venue.name == "S&P":
+            for entry in soup.select(".list-group-item"):
+                title = entry.select_one("b a[data-toggle='collapse']")
+                if not title:
+                    continue
+                authors = entry.select_one(".authorlist")
+                if authors:
+                    before, after, in_affiliations = [], [], False
+                    for node in authors.children:
+                        if getattr(node, "name", None) == "br":
+                            in_affiliations = True
+                        elif getattr(node, "name", None) != "sup":
+                            (after if in_affiliations else before).append(
+                                node.get_text(" ", strip=True) if hasattr(node, "get_text") else str(node))
+                    sections = [plain("".join(before)), plain("".join(after))]
+                else:
+                    sections = []
+                link = urljoin(url, title["href"])
+                papers.append(VenuePaper(venue.name, f"{year}:{title.get_text(strip=True)}",
+                                          title.get_text(" ", strip=True), link,
+                                          authors=[sections[0]] if sections else [],
+                                          affiliations=[" ".join(sections[1:])] if len(sections) > 1 else [],
+                                          published=str(year)))
+        else:
+            for title in soup.select("h2 a[href*='/presentation/'], h3 a[href*='/presentation/']"):
+                link = urljoin(url, title["href"])
+                papers.append(VenuePaper(venue.name, link, title.get_text(" ", strip=True), link, published=str(year)))
+        if not papers:
+            raise ValueError(f"官方目录没有解析出论文，需检查页面结构：{url}")
+        return papers
+
+    def virtual_conference(self, venue, year):
+        name = venue.name.lower()
+        base = f"https://{name}.cc"
+        data_url = f"{base}/static/virtual/data/{name}-{year}-orals-posters.json"
+        data = self.get(data_url).json()
+        items = data["results"]
+        if data.get("next") or int(data.get("count", len(items))) > len(items):
+            raise ValueError("Official conference export is incomplete")
+        try:
+            abstracts = self.get(f"{base}/static/virtual/data/{name}-{year}-abstracts.json").json()
+        except (httpx.HTTPError, ValueError):
+            abstracts = {}
+            self.warnings.append(f"{venue.name} {year}: 录用目录可用，摘要暂不可用；候选保留重试。")
+        papers = []
+        for item in items:
+            if "workshop" in str(item.get("sourceurl", "")).lower():
+                continue
+            decision = str(item.get("decision", "")).lower()
+            if "reject" in decision or "withdraw" in decision:
+                continue
+            authors = item.get("authors", [])
+            papers.append(VenuePaper(
+                venue.name, str(item["id"]), plain(item["name"]),
+                urljoin(base, item.get("virtualsite_url") or f"/virtual/{year}/poster/{item['id']}"),
+                authors=[a["fullname"] for a in authors], abstract=plain(abstracts.get(str(item["id"]), "")),
+                published=str(year),
+                affiliations=list(dict.fromkeys(a["institution"] for a in authors if a.get("institution"))),
+                pdf_url=item.get("paper_pdf_url") or "",
+            ))
+        return papers
+
+    def semantic_scholar(self, venue, year):
+        token, papers, seen = None, [], set()
+        while True:
+            params = {"venue": "USENIX Security Symposium", "year": str(year),
+                      "fields": "title,abstract,authors,venue,publicationDate,externalIds,url,openAccessPdf"}
+            if token:
+                params["token"] = token
+            data = self.get("https://api.semanticscholar.org/graph/v1/paper/search/bulk", params=params).json()
+            for item in data["data"]:
+                if item.get("venue", "").casefold() not in {"usenix security symposium", "usenix security", "usenix security symp."}:
+                    continue
+                doi = item.get("externalIds", {}).get("DOI", "")
+                papers.append(VenuePaper(venue.name, item["paperId"], item["title"], item["url"],
+                                          authors=[a["name"] for a in item.get("authors", [])],
+                                          abstract=item.get("abstract") or "", doi=doi.lower(),
+                                          published=item.get("publicationDate") or str(year),
+                                          pdf_url=(item.get("openAccessPdf") or {}).get("url", "")))
+            token = data.get("token")
+            if not token:
+                break
+            if token in seen:
+                raise ValueError("Repeated Semantic Scholar page")
+            seen.add(token)
         return papers
 
     def openreview(self, venue, year):
@@ -247,8 +375,11 @@ class VenueSources:
     def crossref(self, venue, today, last_success):
         start = (date.fromisoformat(last_success) - timedelta(days=3)) if last_success else (
             today - timedelta(days=self.lookback_days))
-        field = "index" if last_success else "pub"
-        filters = f"type:journal-article,from-{field}-date:{start},until-{field}-date:{today}"
+        # Continuous-volume journals may give every paper only a year (January 1).
+        # Index timestamps detect their actual arrivals; a publication-year floor excludes backfiles.
+        year_floor = (today - timedelta(days=self.lookback_days)).year
+        filters = (f"type:journal-article,from-index-date:{start},until-index-date:{today},"
+                   f"from-pub-date:{year_floor}-01-01")
         cursor, papers, page_size, seen = "*", [], 200, set()
         while True:
             message = self.get(f"https://api.crossref.org/journals/{venue.identifier}/works", params={
@@ -283,6 +414,23 @@ class VenueSources:
         return papers
 
     def enrich(self, paper):
+        if not paper.abstract and paper.venue in {"S&P", "CCS"} and not paper.doi:
+            from .paper_resolver import title_similarity
+
+            data = self.get("https://api.crossref.org/works", params={
+                "query.bibliographic": paper.title, "rows": 3,
+            }).json()["message"]["items"]
+            matches = [item for item in data if item.get("title") and
+                       title_similarity(item["title"][0], paper.title) >= 0.96]
+            if matches:
+                metadata = crossref_paper(matches[0], paper.venue)
+                paper.doi = metadata.doi
+                paper.abstract = metadata.abstract
+                paper.url = metadata.url
+                paper.affiliations = paper.affiliations or metadata.affiliations
+                paper.pdf_url = metadata.pdf_url
+            else:
+                raise ValueError("录用目录尚无可核实的论文摘要，等待索引补齐")
         if paper.doi and not paper.abstract:
             try:
                 metadata = crossref_paper(self.get(
@@ -308,5 +456,12 @@ class VenueSources:
             paper.abstract = meta.abstract
             paper.authors = paper.authors or meta.authors
             paper.pdf_url = paper.pdf_url or meta.pdf_url or ""
-            paper.affiliations = list(dict.fromkeys(parser.meta.get("citation_author_institution", [])))
+            paper.affiliations = paper.affiliations or list(dict.fromkeys(parser.meta.get("citation_author_institution", [])))
         return paper
+
+
+def split_authors(text):
+    pairs = re.findall(r"([^();]+)\(([^()]+)\)", text)
+    if pairs:
+        return [name.strip(" ,;") for name, _ in pairs], list(dict.fromkeys(org.strip() for _, org in pairs))
+    return ([text] if text else []), []

@@ -144,7 +144,8 @@ class VenueMonitor:
         for venue in VENUES:
             try:
                 previous = state["venues"].get(venue.name, {})
-                papers = self.sources.fetch(venue, today, previous.get("last_success"))
+                papers = self.sources.fetch(venue, today, previous.get("last_success")
+                                            if previous.get("feed_revision") == 2 else None)
                 new = 0
                 for paper in papers:
                     if not paper.title or not paper.url:
@@ -169,7 +170,7 @@ class VenueMonitor:
                     if record["status"] == "pending":
                         record["paper"] = paper.to_dict()
                     state["papers"][key] = record
-                state["venues"][venue.name] = {"last_success": today.isoformat(), "count": len(papers)}
+                state["venues"][venue.name] = {"last_success": today.isoformat(), "count": len(papers), "feed_revision": 2}
                 report["venues"][venue.name] = {"status": "ok", "fetched": len(papers), "new": new}
                 self.store.save(state)
             except Exception as exc:
