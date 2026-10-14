@@ -1,4 +1,3 @@
-from copy import deepcopy
 from datetime import date
 import json
 from types import SimpleNamespace
@@ -10,7 +9,7 @@ import pytest
 
 from zotero_arxiv_daily.venue_monitor import VenueMonitor, VenueReviewer, candidate, render_digest
 from zotero_arxiv_daily.venue_sources import VENUES, VenuePaper, VenueSources
-from zotero_arxiv_daily.venue_state import FileStateStore, GitHubStateStore, empty_state
+from zotero_arxiv_daily.venue_state import FileStateStore, GitHubStateStore
 
 
 TODAY = date(2026, 10, 14)
@@ -47,6 +46,7 @@ def test_all_14_checked_and_independent_digest_sent_once(tmp_path):
     assert monitor.run(TODAY)["sent"] == 0
     assert send.call_count == reviewer.review.call_count == 1
     assert next(iter(store.load()["deliveries"].values()))["status"] == "sent"
+    assert "paper" not in next(iter(store.load()["papers"].values()))
 
 
 def test_failed_source_does_not_block_other_venues_or_advance_watermark(tmp_path):
@@ -88,6 +88,15 @@ def test_budget_preserves_backlog_and_fairness(tmp_path):
     assert "Nature" in send.call_args.args[0]
     assert monitor.run(date(2026, 10, 15))["sent"] == 2
     assert monitor.run(date(2026, 10, 16))["sent"] == 1
+
+
+def test_new_arrivals_take_priority_over_bootstrap_backlog(tmp_path):
+    papers = [paper(title=f"LLM privacy old {i}") for i in range(3)]
+    monitor, _, _, _, send = setup_monitor(tmp_path, papers, max_reviews=1)
+    monitor.run(TODAY)
+    papers.append(paper(title="LLM privacy newly announced"))
+    monitor.run(date(2026, 10, 15))
+    assert "newly announced" in send.call_args.args[0]
 
 
 def test_smtp_uncertainty_is_persisted_before_send_and_never_blindly_retried(tmp_path):

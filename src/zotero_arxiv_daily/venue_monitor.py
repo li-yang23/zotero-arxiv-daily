@@ -184,6 +184,11 @@ class VenueMonitor:
                        if record["status"] == "pending" and record.get("retry_after", "") <= today.isoformat()]
             # Round-robin prevents a large conference release starving the other venues.
             queues = defaultdict(list)
+            pending.sort(key=lambda item: (
+                item[1]["first_seen"],
+                bool(re.search(r"privacy|access.control|permission|leak|jailbreak|prompt.injection|membership",
+                               item[1]["paper"]["title"], re.I)),
+            ), reverse=True)
             for key, record in pending:
                 queues[record["paper"]["venue"]].append((key, record))
             ordered = []
@@ -202,6 +207,9 @@ class VenueMonitor:
                         record["review"] = review
                         record["status"] = "ready" if review["relevant"] else "excluded"
                     record.pop("error", None)
+                    if record["status"] == "excluded":
+                        record.pop("paper", None)
+                        record.pop("review", None)
                 except Exception as exc:
                     record["error"] = str(exc)
                     record["attempts"] = record.get("attempts", 0) + 1
@@ -233,6 +241,10 @@ class VenueMonitor:
             self.send(html, subject=subject)
             for record in ready.values():
                 record["status"] = "sent"
+                record["sent_at"] = today.isoformat()
+                # Keep identities, not a permanent copy of every abstract and summary in Git state.
+                record.pop("paper", None)
+                record.pop("review", None)
             state["deliveries"][delivery_id]["status"] = "sent"
             self.store.save(state)
             report["sent"] = len(ready)

@@ -144,7 +144,8 @@ abstracts and API failures stay pending and are retried, never replaced with inv
 The topic score is explicitly distinct from Zotero similarity. Institutions are shown only when the
 publisher metadata supplies them. No full-analysis section is added; the configured API-balance footer
 is reused. By default up to 40 candidates are processed per run, round-robin across venues; excess stays
-queued for subsequent runs rather than being dropped.
+queued for subsequent runs rather than being dropped. New daily arrivals take priority over the initial
+backlog, with privacy/access-control topics prioritized within each day.
 
 Delivery history and pending work live in `venue-monitor-state.json` on the separate
 `codex/venue-monitor-state` branch. This contains public paper metadata and delivery status only,
