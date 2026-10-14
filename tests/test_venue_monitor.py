@@ -278,6 +278,17 @@ def test_usenix_fallback_reports_degraded_coverage_and_paginates():
     assert "Semantic Scholar" in source.warnings[0]
 
 
+def test_metadata_enrichment_preserves_official_institutions():
+    def handler(request):
+        if request.url.host == "api.crossref.org":
+            return httpx.Response(200, json={"message": {"DOI": "10.1/test", "title": ["LLM privacy"]}})
+        return httpx.Response(200, text=f'<meta name="citation_title" content="LLM privacy"><meta name="citation_abstract" content="{ABSTRACT}">')
+    p = VenuePaper("NDSS", "test", "LLM privacy", "https://doi.org/10.1/test", doi="10.1/test",
+                   affiliations=["Example University"])
+    result = source_with(handler).enrich(p)
+    assert result.affiliations == ["Example University"] and result.abstract == ABSTRACT
+
+
 def test_corrupt_local_state_never_resets(tmp_path):
     path = tmp_path / "state.json"
     path.write_text('{"version":2}')

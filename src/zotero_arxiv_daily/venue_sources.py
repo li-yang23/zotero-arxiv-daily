@@ -437,7 +437,7 @@ class VenueSources:
                     "https://api.crossref.org/works/" + quote(paper.doi, safe="")
                 ).json()["message"], paper.venue)
                 paper.abstract = metadata.abstract
-                paper.affiliations = metadata.affiliations
+                paper.affiliations = paper.affiliations or metadata.affiliations
                 paper.pdf_url = paper.pdf_url or metadata.pdf_url
             except (httpx.HTTPError, ValueError, KeyError):
                 pass  # Publisher landing pages are the next source for missing metadata.
