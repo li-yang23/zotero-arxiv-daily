@@ -113,6 +113,28 @@ def test_new_abstract_reconsiders_excluded_title(tmp_path):
     assert monitor.run(TODAY)["sent"] == 1
 
 
+def test_title_update_with_same_doi_is_not_resent(tmp_path):
+    p = paper()
+    p.doi = "10.1/same"
+    monitor, _, _, _, send = setup_monitor(tmp_path, [p])
+    assert monitor.run(TODAY)["sent"] == 1
+    p.title = "Revised title about LLM privacy"
+    p.identifier = "another-provider"
+    assert monitor.run(TODAY)["sent"] == 0
+    assert send.call_count == 1
+
+
+def test_new_metadata_refreshes_pending_paper(tmp_path):
+    p = paper()
+    p.abstract = ""
+    monitor, _, reviewer, _, _ = setup_monitor(tmp_path, [p])
+    reviewer.review.side_effect = ValueError("missing abstract")
+    assert monitor.run(TODAY)["sent"] == 0
+    p.abstract = ABSTRACT
+    reviewer.review.side_effect = None
+    assert monitor.run(TODAY)["sent"] == 1
+
+
 def test_keyword_boundaries_and_no_venue_name_contamination():
     p = paper("USENIX Security", "Reagents in diffusion physics")
     p.abstract = "Chemical reagents diffuse."

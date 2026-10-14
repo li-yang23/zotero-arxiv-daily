@@ -22,7 +22,8 @@ SECURITY = re.compile(
     r"permissions?|access[ -]control|authoriz\w*|authentic\w*|leak\w*|jailbreak\w*|"
     r"prompt[ -]injection|inference[ -]attacks?|membership|unlearn\w*|memor\w*|"
     r"extract\w*|steal\w*|theft|poison\w*|backdoor\w*|adversarial|watermark\w*|"
-    r"copyright|alignment|trust\w*|sandbox\w*|hijack\w*|exfiltrat\w*|consent)\b", re.I)
+    r"copyright|alignment|trust\w*|sandbox\w*|hijack\w*|exfiltrat\w*|consent|attacks?|"
+    r"defen\w*|vulnerab\w*|risk\w*|robust\w*|malicious|harmful|abuse|threat\w*)\b", re.I)
 CATEGORIES = ("隐私保护与数据泄露", "权限控制与Agent安全", "越狱与提示注入", "模型与训练安全", "其他相关安全")
 
 
@@ -33,6 +34,13 @@ def paper_key(paper):
 
 def fingerprint(paper):
     return sha256(f"{paper.title}\n{paper.abstract}".encode()).hexdigest()
+
+
+def aliases(paper):
+    values = [f"title:{paper_key(paper)}", f"id:{paper.identifier}"]
+    if paper.doi:
+        values.append(f"doi:{paper.doi.casefold()}")
+    return [f"{paper.venue}:{value}" for value in values]
 
 
 def candidate(paper):
@@ -131,6 +139,7 @@ class VenueMonitor:
 
     def run(self, today, *, discover_only=False):
         state = self.store.load()
+        known = {alias: key for key, record in state["papers"].items() for alias in record.get("aliases", [])}
         report = {"date": today.isoformat(), "venues": {}, "errors": [], "sent": 0, "pending": 0}
         for venue in VENUES:
             try:
@@ -140,14 +149,23 @@ class VenueMonitor:
                 for paper in papers:
                     if not paper.title or not paper.url:
                         raise ValueError("论文记录缺少标题或链接")
-                    key, digest = paper_key(paper), fingerprint(paper)
+                    identities = aliases(paper)
+                    key = next((known[a] for a in identities if a in known), paper_key(paper))
+                    digest = fingerprint(paper)
                     record = state["papers"].get(key)
+                    if record:
+                        record["aliases"] = list(dict.fromkeys(record.get("aliases", []) + identities))
+                        if record["status"] == "pending" and paper.abstract and not record["paper"]["abstract"]:
+                            record["paper"] = paper.to_dict()
+                            record.pop("retry_after", None)
+                    known.update({a: key for a in identities})
                     if record and (record["status"] != "excluded" or record.get("fingerprint") == digest):
                         continue
                     if not record:
                         new += 1
                     record = {"status": "pending" if candidate(paper) else "excluded", "fingerprint": digest,
-                              "first_seen": record["first_seen"] if record else today.isoformat()}
+                              "first_seen": record["first_seen"] if record else today.isoformat(),
+                              "aliases": list(dict.fromkeys((record or {}).get("aliases", []) + identities))}
                     if record["status"] == "pending":
                         record["paper"] = paper.to_dict()
                     state["papers"][key] = record
