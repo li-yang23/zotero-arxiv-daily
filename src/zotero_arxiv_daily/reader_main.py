@@ -1,5 +1,7 @@
 """Process a bounded number of private reading jobs using the existing LLM config."""
 import json
+import os
+from pathlib import Path
 import ipaddress
 import socket
 import re
@@ -146,7 +148,7 @@ def analyze(job, resolver, llm, config, http):
     raise RuntimeError('所有配置模型均未完成精读：'+type(last_error).__name__)
 
 
-def run(config, *, client=None, resolver=None, llm=None, max_jobs=3):
+def run(config, *, client=None, resolver=None, llm=None, max_jobs=3, initial_job=None):
     bridge=client or ReaderClient()
     if not bridge.enabled:
         logger.info('Reader is not configured; nothing to process')
@@ -158,9 +160,9 @@ def run(config, *, client=None, resolver=None, llm=None, max_jobs=3):
     started=time.monotonic()
     try:
         with httpx.Client(timeout=25) as http:
-            for _ in range(max_jobs):
+            for index in range(max_jobs):
                 if time.monotonic()-started>18*60: break
-                job=bridge.post('claim',{}).get('job')
+                job=initial_job if index == 0 and initial_job else bridge.post('claim',{}).get('job')
                 if not job: break
                 payload={'id':job['id'],'lease':job['lease']}
                 try:
@@ -178,5 +180,8 @@ def run(config, *, client=None, resolver=None, llm=None, max_jobs=3):
 
 dotenv.load_dotenv()
 @hydra.main(version_base=None, config_path='../../config', config_name='default')
-def main(config): run(config)
+def main(config):
+    path = os.environ.get('PAPER_READER_JOB')
+    initial = json.loads(Path(path).read_text()) if path and Path(path).exists() else None
+    run(config, initial_job=initial)
 if __name__=='__main__': main()

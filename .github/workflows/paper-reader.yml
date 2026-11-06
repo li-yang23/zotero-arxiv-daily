@@ -12,13 +12,20 @@ jobs:
   read:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      PAPER_READER_URL: ${{ vars.PAPER_READER_URL }}
+      PAPER_READER_TOKEN: ${{ secrets.PAPER_READER_TOKEN }}
+      PAPER_READER_JOB: ${{ runner.temp }}/paper-reader-job.json
     steps:
       - uses: actions/checkout@v6
+      - name: Check for selected papers without installing ML dependencies
+        id: queue
+        run: python scripts/claim_reader_job.py
       - uses: astral-sh/setup-uv@v7
+        if: steps.queue.outputs.pending == 'true'
       - name: Read queued papers
+        if: steps.queue.outputs.pending == 'true'
         env:
-          PAPER_READER_URL: ${{ vars.PAPER_READER_URL }}
-          PAPER_READER_TOKEN: ${{ secrets.PAPER_READER_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
           RECEIVER: ${{ secrets.RECEIVER }}
