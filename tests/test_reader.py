@@ -112,3 +112,19 @@ def test_exact_arxiv_reader_falls_back_to_official_pdf():
         assert result.paper.full_text=='full document'
         resolver._download_pdf_text.assert_called_once_with('https://arxiv.org/pdf/2610.07212')
     finally: resolver.close()
+
+
+def test_streamed_analysis_ignores_reasoning_and_joins_content(monkeypatch):
+    import zotero_arxiv_daily.reader_main as module
+    monkeypatch.setattr(module,'truncate_text_by_tokens',lambda text,n:text)
+    monkeypatch.setattr(module,'background_sources',lambda p,c:{'status':'retrieved','sources':[]})
+    resolver=Mock();resolver.resolve.return_value=SimpleNamespace(paper=SimpleNamespace(full_text='paper '*200,title='Paper',url='https://arxiv.org/abs/2610.07212'))
+    report=json.dumps({'sections':[{'title':'Method','blocks':[{'type':'text','text':'A complete report'}]}]})
+    chunks=[SimpleNamespace(choices=[]),SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None,reasoning_content='private reasoning'),finish_reason=None)])]
+    chunks += [SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=piece),finish_reason=None)]) for piece in [report[:17],report[17:]]]
+    chunks.append(SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None),finish_reason='stop')]))
+    llm=Mock();llm.chat.completions.create.return_value=chunks
+    config=OmegaConf.create({'llm':{'generation_kwargs':{'model':'test'}}})
+    result,_=analyze({'title':'Paper','url':'https://arxiv.org/abs/2610.07212','prompt':'review'},resolver,llm,config,None)
+    assert 'A complete report' in result and 'private reasoning' not in result
+    assert llm.chat.completions.create.call_args.kwargs['stream'] is True
