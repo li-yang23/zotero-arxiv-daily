@@ -1,0 +1,30 @@
+name: Read selected papers
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '3,13,23,33,43,53 * * * *'
+permissions:
+  contents: read
+concurrency:
+  group: paper-reader
+  cancel-in-progress: false
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - name: Read queued papers
+        env:
+          PAPER_READER_URL: ${{ vars.PAPER_READER_URL }}
+          PAPER_READER_TOKEN: ${{ secrets.PAPER_READER_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
+          RECEIVER: ${{ secrets.RECEIVER }}
+          CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
+        run: |
+          if [ -n "$CUSTOM_CONFIG" ]; then
+            printf '%s\n' "$CUSTOM_CONFIG" > config/custom.yaml
+          fi
+          uv run python -m zotero_arxiv_daily.reader_main

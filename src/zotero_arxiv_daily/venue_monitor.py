@@ -4,6 +4,7 @@ from collections import Counter, defaultdict
 from datetime import date, timedelta
 from hashlib import sha256
 from html import escape
+from .reader import attach_reader
 import json
 import re
 
@@ -129,7 +130,11 @@ def render_digest(records, today, report, balance=None):
     if balance:
         html.append(f"<p>API 余额：{escape(balance)}</p>")
     html.append("</body></html>")
-    return "".join(html)
+    return attach_reader("".join(html), [
+        {"title": r["paper"]["title"], "url": r["paper"]["url"],
+         "summary": r["review"]["summary"], "group": r["paper"]["venue"]}
+        for r in records
+    ], title="顶会顶刊安全专题")
 
 
 class VenueMonitor:

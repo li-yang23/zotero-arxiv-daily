@@ -41,6 +41,8 @@ jobs:
           API_BALANCE_ENDPOINT: ${{ secrets.API_BALANCE_ENDPOINT }}
           API_BALANCE_JSON_PATH: ${{ vars.API_BALANCE_JSON_PATH }}
           API_BALANCE_CURRENCY: ${{ vars.API_BALANCE_CURRENCY }}
+          PAPER_READER_URL: ${{ vars.PAPER_READER_URL }}
+          PAPER_READER_TOKEN: ${{ secrets.PAPER_READER_TOKEN }}
           CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
         run: |
           printf "%b\n" "$CUSTOM_CONFIG" > config/custom.yaml
@@ -69,6 +71,8 @@ jobs:
           API_BALANCE_ENDPOINT: ${{ secrets.API_BALANCE_ENDPOINT }}
           API_BALANCE_JSON_PATH: ${{ vars.API_BALANCE_JSON_PATH }}
           API_BALANCE_CURRENCY: ${{ vars.API_BALANCE_CURRENCY }}
+          PAPER_READER_URL: ${{ vars.PAPER_READER_URL }}
+          PAPER_READER_TOKEN: ${{ secrets.PAPER_READER_TOKEN }}
           CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
           DISCOVER_ONLY: ${{ inputs.discover_only || false }}
         run: |

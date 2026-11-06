@@ -120,7 +120,7 @@ executor:
 
 The daily workflow has an independent `monitor-venues` job. It checks all 14 venues every day,
 even when `CUSTOM_CONFIG` sets `executor.source: [arxiv]` or the arXiv/Zotero job fails.
-The existing schedule is 23:00 UTC (07:00 Asia/Shanghai the next day); GitHub can delay scheduled jobs.
+The schedule is 23:23 UTC (07:23 Asia/Shanghai the next day); GitHub can delay scheduled jobs.
 Relevant papers are sent separately with the subject `[顶会顶刊安全专题]`, grouped by venue and
 security topic. They do not compete with the arXiv top-25 quota or its quality filter.
 
@@ -267,7 +267,7 @@ That's all! Now you can test the workflow by manually triggering it:
 
 Then check the log and the receiver email after it finishes.
 
-By default, the main workflow runs on 22:00 UTC everyday. You can change this time by editting the workflow config `.github/workflows/main.yml`.
+The main workflow runs at 23:23 UTC (07:23 Asia/Shanghai the next day). You can change this time by editting the workflow config `.github/workflows/main.yml`.
 
 ### Local Running
 Supported by [uv](https://github.com/astral-sh/uv), this workflow can easily run on your local device if uv is installed:
@@ -347,3 +347,14 @@ If you find this project helpful, welcome to sponsor me via WeChat or via [ko-fi
 ## 🌟 Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=TideDra/zotero-arxiv-daily&type=Date)](https://star-history.com/#TideDra/zotero-arxiv-daily&Date)
+
+
+## Private paper reader
+
+Daily arXiv and venue emails include a **选择论文并精读** link when the reader is configured. Open it, select up to 10 papers, edit or save your prompt, and submit. Reports remain in the private site across devices; the Results tab shows queued, running, completed and failed jobs. The default reviewer prompt is retained in `config/reading_prompt.txt` and the site's `lib/reading-prompt.ts`.
+
+The site lives in `reader-site/` and uses Sites owner-only access and D1 storage. GitHub Actions runs `.github/workflows/paper-reader.yml` about every ten minutes, at most three papers per run, using the existing `OPENAI_API_KEY`, `OPENAI_API_BASE` and `CUSTOM_CONFIG`. Set repository variable `PAPER_READER_URL` to the deployed site origin and encrypted secret `PAPER_READER_TOKEN` to its Sites service-access token. The same token must be configured as secret `READER_SERVICE_TOKEN` in Sites. Never commit tokens. Site access must remain owner-private; the worker endpoint additionally checks its service token. Publication and service access are independent of GitHub Actions availability.
+
+Full text is required: unavailable PDFs and documents beyond the current 65,000-token limit fail explicitly. Background lookup retrieves up to eight cited-paper abstracts from Semantic Scholar; missing/rate-limited retrieval is recorded in the report, and is not presented as an exhaustive literature review. The LLM returns structured prose, flow diagrams and optional quantitative charts; illustrative figures must be labelled and must not be presented as experimental data. Prompts and results are stored in the private database, not in the public GitHub repository. Abandoned jobs become eligible for retry after 30 minutes, at most three claims. A stale worker heartbeat is visible in the site.
+
+If GitHub says **Workflows are not currently being run on this fork due to the scale of GitHub Actions usage**, sign in as the repository maintainer and re-enable workflows from the Actions page. The normal workflow-enabled and repository-permissions APIs may still report enabled while dispatch returns HTTP 422. This is distinct from a cron or SMTP failure. After recovery, manually run **Read selected papers** and **Send emails daily** to verify, then observe the next scheduled run.
