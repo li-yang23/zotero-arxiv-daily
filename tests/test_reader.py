@@ -85,3 +85,30 @@ def test_reader_rejects_private_redirect(monkeypatch):
     with PublicPaperClient(transport=httpx.MockTransport(handle)) as client:
         with pytest.raises(ValueError,match='公网'): client.get('https://arxiv.org/pdf/test')
     assert seen==['https://arxiv.org/pdf/test']
+
+
+def test_exact_arxiv_reader_never_calls_export_api():
+    from zotero_arxiv_daily.reader_main import ReadingPaperResolver
+    from zotero_arxiv_daily.request_models import PaperRequest
+    resolver=ReadingPaperResolver(OmegaConf.create({}))
+    paper=SimpleNamespace(full_text='body')
+    resolver._paper_from_web_page=Mock(return_value=paper)
+    resolver._lookup_arxiv_id=Mock(side_effect=AssertionError('must not call export API'))
+    try:
+        result=resolver.resolve(PaperRequest('Title','https://arxiv.org/abs/2610.07212',0))
+        assert result.paper is paper and result.status=='matched'
+        resolver._lookup_arxiv_id.assert_not_called()
+    finally: resolver.close()
+
+
+def test_exact_arxiv_reader_falls_back_to_official_pdf():
+    from zotero_arxiv_daily.reader_main import ReadingPaperResolver
+    from zotero_arxiv_daily.request_models import PaperRequest
+    resolver=ReadingPaperResolver(OmegaConf.create({}))
+    resolver._paper_from_web_page=Mock(side_effect=httpx.TimeoutException('timeout'))
+    resolver._download_pdf_text=Mock(return_value='full document')
+    try:
+        result=resolver.resolve(PaperRequest('Title','https://arxiv.org/abs/2610.07212',0))
+        assert result.paper.full_text=='full document'
+        resolver._download_pdf_text.assert_called_once_with('https://arxiv.org/pdf/2610.07212')
+    finally: resolver.close()
