@@ -32,6 +32,7 @@ jobs:
                   'model': os.environ['CHECK_MODEL'],
                   'messages': [{'role': 'user', 'content': 'Return only a JSON object with a single field: {"status":"OK"}.'}],
                   'response_format': {'type': 'json_object'},
+                  'stream': True,
                   'max_tokens': 256,
               }).encode(),
               headers={
@@ -42,11 +43,18 @@ jobs:
           try:
               with urllib.request.urlopen(request, timeout=45) as response:
                   print('Summary API HTTP status:', response.status)
-                  result = json.load(response)
-                  choices = result.get('choices') or []
-                  choice = choices[0] if choices else {}
-                  content = choice.get('message', {}).get('content') or ''
-                  print('Finish reason:', choice.get('finish_reason'))
+                  chunks = []
+                  finish = None
+                  for line in response:
+                      if not line.startswith(b'data: '): continue
+                      data = line[6:].strip()
+                      if data == b'[DONE]': break
+                      event = json.loads(data)
+                      for choice in event.get('choices') or []:
+                          chunks.append(choice.get('delta', {}).get('content') or '')
+                          finish = choice.get('finish_reason') or finish
+                  content = ''.join(chunks)
+                  print('Finish reason:', finish)
                   print('Content characters:', len(content))
                   parsed = json.loads(content)
                   if parsed.get('status') != 'OK':
