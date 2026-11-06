@@ -6,7 +6,7 @@ on:
     # A monthly commit keeps public-repository activity well inside GitHub's
     # 60-day scheduled-workflow inactivity window. Avoid the top of the hour,
     # when scheduled Actions are more likely to be delayed or dropped.
-    - cron: '17 3 1 * *'
+    - cron: '19 3 1 * *'
 
 concurrency:
   group: keep-alive

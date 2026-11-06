@@ -10,7 +10,7 @@ on:
         type: boolean
   schedule:
     # Avoid the top of the hour, when scheduled Actions are more likely to queue.
-    - cron: '7/10 * * * *'
+    - cron: '8/10 * * * *'
 
 concurrency:
   group: emailed-paper-lists
