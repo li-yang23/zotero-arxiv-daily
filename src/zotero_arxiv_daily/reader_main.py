@@ -119,6 +119,18 @@ def background_sources(paper, client):
                 'instruction':'Explicitly say external background retrieval failed; use the paper references only and do not claim independent verification.'}
 
 
+def normalize_prose(text):
+    text=text.replace(r'\n\n','\n\n').replace('$$'+r'\n','$$\n').replace(r'\n'+'$$','\n$$')
+    def math_text(match):
+        delimiter,body=match.groups()
+        # Only repair consistently double-escaped math. Valid LaTeX matrices
+        # have ordinary commands plus double-backslash row separators.
+        if re.search(r'\\\\[A-Za-z]{2,}',body) and not re.search(r'(?<!\\)\\[A-Za-z]',body):
+            body=body.replace('\\\\','\\')
+        return delimiter+body+delimiter
+    return re.sub(r'(?<!\\)(\${1,2})(.*?)\1',math_text,text,flags=re.S)
+
+
 def validate_result(content):
     text = content.strip()
     if text.startswith('```'):
@@ -135,9 +147,7 @@ def validate_result(content):
                 raise ValueError('报告内容格式错误')
             if block['type']=='text':
                 if not isinstance(block.get('text'),str): raise ValueError('正文格式错误')
-                # Some JSON-mode models escape paragraph breaks twice. Preserve
-                # LaTeX commands such as \nabla while restoring prose paragraphs.
-                block['text']=block['text'].replace(r'\n\n','\n\n')
+                block['text']=normalize_prose(block['text'])
                 has_text |= bool(block['text'].strip())
             elif block['type']=='flow':
                 nodes=block.get('nodes')

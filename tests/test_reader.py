@@ -74,6 +74,13 @@ def test_normalize_paragraphs_preserves_math_commands():
     assert text=='Paragraph one.\n\nGradient $\\nabla f$.'
 
 
+def test_repair_double_escaped_math_but_keep_matrix_rows():
+    from zotero_arxiv_daily.reader_main import normalize_prose
+    assert normalize_prose(r'$$\n\\theta \\in \\mathbb{R}\n$$')=='$$\n\\theta \\in \\mathbb{R}\n$$'
+    valid=r'$\begin{matrix}a\\b\end{matrix}$'
+    assert normalize_prose(valid)==valid
+
+
 def test_model_fallback_keeps_prompt_and_sources(monkeypatch):
     import zotero_arxiv_daily.reader_main as module
     monkeypatch.setattr(module,'truncate_text_by_tokens',lambda text,n:text)
