@@ -68,6 +68,12 @@ def test_long_flow_labels_do_not_discard_complete_report():
     assert json.loads(validate_result(json.dumps(report)))==report
 
 
+def test_normalize_paragraphs_preserves_math_commands():
+    report={'sections':[{'title':'Method','blocks':[{'type':'text','text':r'Paragraph one.\n\nGradient $\nabla f$.'}]}]}
+    text=json.loads(validate_result(json.dumps(report)))['sections'][0]['blocks'][0]['text']
+    assert text=='Paragraph one.\n\nGradient $\\nabla f$.'
+
+
 def test_model_fallback_keeps_prompt_and_sources(monkeypatch):
     import zotero_arxiv_daily.reader_main as module
     monkeypatch.setattr(module,'truncate_text_by_tokens',lambda text,n:text)

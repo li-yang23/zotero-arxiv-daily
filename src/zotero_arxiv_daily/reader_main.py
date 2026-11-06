@@ -135,6 +135,9 @@ def validate_result(content):
                 raise ValueError('报告内容格式错误')
             if block['type']=='text':
                 if not isinstance(block.get('text'),str): raise ValueError('正文格式错误')
+                # Some JSON-mode models escape paragraph breaks twice. Preserve
+                # LaTeX commands such as \nabla while restoring prose paragraphs.
+                block['text']=block['text'].replace(r'\n\n','\n\n')
                 has_text |= bool(block['text'].strip())
             elif block['type']=='flow':
                 nodes=block.get('nodes')
