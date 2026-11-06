@@ -1,0 +1,55 @@
+name: Publish paper reader
+on:
+  push:
+    branches: [main]
+    paths: ['reader-pages/**', 'scripts/build_reader_library.py', '.github/workflows/reader-pages.yml']
+  workflow_dispatch:
+  workflow_run:
+    workflows: ['Read selected papers', 'Send emails daily']
+    types: [completed]
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - uses: actions/checkout@v6
+        with:
+          ref: reader-data
+          path: reader-data
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+          cache: npm
+          cache-dependency-path: reader-pages/package-lock.json
+      - name: Prepare public library
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: python scripts/build_reader_library.py reader-data/state.json reader-pages/public/data/library.json "$REPOSITORY"
+      - uses: actions/configure-pages@v5
+        id: pages
+      - name: Build static reader
+        working-directory: reader-pages
+        env:
+          PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}/
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: reader-pages/dist
+      - uses: actions/deploy-pages@v4
+        id: deployment

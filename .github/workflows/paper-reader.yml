@@ -1,20 +1,32 @@
 name: Read selected papers
 on:
   workflow_dispatch:
+    inputs:
+      request:
+        description: Optional paper request JSON copied from the reader
+        type: string
+        required: false
+  issues:
+    types: [opened, reopened]
   schedule:
     - cron: '3,13,23,33,43,53 * * * *'
 permissions:
-  contents: read
+  contents: write
+  issues: read
 concurrency:
   group: paper-reader
   cancel-in-progress: false
 jobs:
   read:
+    if: >-
+      (github.event_name == 'issues' && github.event.issue.user.login == github.repository_owner && startsWith(github.event.issue.title, '[Paper Reader]')) ||
+      (github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner) ||
+      github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
       PAPER_READER_URL: ${{ vars.PAPER_READER_URL }}
-      PAPER_READER_TOKEN: ${{ secrets.PAPER_READER_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
       PAPER_READER_JOB: .reader-job.json
     steps:
       - uses: actions/checkout@v6

@@ -12,7 +12,8 @@ from zotero_arxiv_daily.reader_main import analyze, validate_result, background_
 
 def test_upload_failure_does_not_prevent_email(monkeypatch):
     monkeypatch.setenv('PAPER_READER_URL','https://reader.example')
-    monkeypatch.setenv('PAPER_READER_TOKEN','secret')
+    monkeypatch.setenv('GH_TOKEN','secret')
+    monkeypatch.setenv('GITHUB_REPOSITORY','owner/repo')
     monkeypatch.setattr(ReaderClient,'post',Mock(side_effect=RuntimeError('network')))
     html='<html><body>daily</body></html>'
     assert attach_reader(html,[{'title':'x','url':'https://arxiv.org/abs/1234.12345'}])==html
@@ -20,24 +21,14 @@ def test_upload_failure_does_not_prevent_email(monkeypatch):
 
 def test_upload_links_only_after_success(monkeypatch):
     monkeypatch.setenv('PAPER_READER_URL','https://reader.example')
-    monkeypatch.setenv('PAPER_READER_TOKEN','secret')
+    monkeypatch.setenv('GH_TOKEN','secret')
+    monkeypatch.setenv('GITHUB_REPOSITORY','owner/repo')
     post=Mock(return_value={'ok':True}); monkeypatch.setattr(ReaderClient,'post',post)
     result=attach_reader('<body>papers</body>',[{'title':'x','url':'https://arxiv.org/abs/1234.12345'}])
     assert '选择论文并精读' in result
     assert 'secret' not in result
     assert post.call_args.args[1]['id'] in result
 
-
-def test_transport_does_not_follow_auth_redirects(monkeypatch):
-    monkeypatch.setenv('PAPER_READER_URL','https://reader.example')
-    monkeypatch.setenv('PAPER_READER_TOKEN','secret')
-    calls=[]
-    def handle(request):
-        calls.append(request)
-        return httpx.Response(302,headers={'Location':'https://elsewhere.example'})
-    client=ReaderClient(httpx.Client(transport=httpx.MockTransport(handle)))
-    with pytest.raises(httpx.HTTPStatusError): client.post('claim',{})
-    assert len(calls)==1
 
 
 def test_full_text_is_required():

@@ -1,26 +1,17 @@
-"""Cheap queue probe: skip installing the ML environment when there is no work."""
+"""Import owner requests and claim one job before installing ML dependencies."""
 import json
 import os
 from pathlib import Path
-from urllib.request import Request, build_opener, HTTPRedirectHandler
+import sys
 
-class NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        # Never forward the private service token to a sign-in or external host.
-        return None
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
+from zotero_arxiv_daily.github_reader import GitHubReaderClient
 
-
-url = os.environ.get('PAPER_READER_URL', '').rstrip('/')
-token = os.environ.get('PAPER_READER_TOKEN', '')
-job = None
-if url and token:
-    request = Request(url + '/api/reader/worker/claim', data=b'{}', headers={
-        'Content-Type': 'application/json',
-        'OAI-Sites-Authorization': 'Bearer ' + token,
-        'X-Reader-Token': token,
-    })
-    with build_opener(NoRedirect()).open(request, timeout=45) as response:
-        job = json.load(response).get('job')
+client = GitHubReaderClient()
+if not client.enabled:
+    raise RuntimeError('GitHub reader credentials are missing')
+client.sync_requests()
+job = client.post('claim', {}).get('job')
 if job:
     path = Path(os.environ['PAPER_READER_JOB'])
     path.write_text(json.dumps(job, ensure_ascii=False), encoding='utf-8')

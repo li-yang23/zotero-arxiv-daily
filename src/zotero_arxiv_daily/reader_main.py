@@ -1,4 +1,4 @@
-"""Process a bounded number of private reading jobs using the existing LLM config."""
+"""Process a bounded number of owner-approved reading jobs using the existing LLM config."""
 import json
 import os
 from pathlib import Path

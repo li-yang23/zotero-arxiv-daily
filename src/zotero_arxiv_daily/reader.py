@@ -1,4 +1,4 @@
-"""Private reading queue bridge; credentials stay in Actions secrets."""
+"""Publish email candidates to the GitHub Pages reader."""
 import hashlib
 import json
 import os
@@ -6,29 +6,10 @@ from html import escape
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-import httpx
 from loguru import logger
 
 
-class ReaderClient:
-    def __init__(self, client=None):
-        self.url = os.environ.get('PAPER_READER_URL', '').rstrip('/')
-        self.token = os.environ.get('PAPER_READER_TOKEN', '')
-        self.client = client or httpx.Client(timeout=45)
-
-    @property
-    def enabled(self):
-        return self.url.startswith('https://') and bool(self.token)
-
-    def post(self, path, payload):
-        response = self.client.post(self.url + '/api/reader/worker/' + path,
-            json=payload, headers={'OAI-Sites-Authorization': 'Bearer ' + self.token,
-                                  'X-Reader-Token': self.token})
-        response.raise_for_status()
-        return response.json()
-
-    def close(self):
-        self.client.close()
+from .github_reader import GitHubReaderClient as ReaderClient
 
 
 def attach_reader(html, papers, title='论文日报'):
