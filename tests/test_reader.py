@@ -128,3 +128,25 @@ def test_streamed_analysis_ignores_reasoning_and_joins_content(monkeypatch):
     result,_=analyze({'title':'Paper','url':'https://arxiv.org/abs/2610.07212','prompt':'review'},resolver,llm,config,None)
     assert 'A complete report' in result and 'private reasoning' not in result
     assert llm.chat.completions.create.call_args.kwargs['stream'] is True
+    assert llm.chat.completions.create.call_args.kwargs['response_format'] == {'type':'json_object'}
+
+
+def test_format_repair_preserves_report_without_rereading_paper():
+    from zotero_arxiv_daily.reader_main import parse_report
+    malformed = r'{"sections":[{"title":"Method","blocks":[{"type":"text","text":"Formula $\epsilon=8$"}]}]}'
+    valid = {'sections':[{'title':'Method','blocks':[{'type':'text','text':r'Formula $\epsilon=8$'}]}]}
+    llm=Mock(); llm.chat.completions.create.return_value=[SimpleNamespace(choices=[SimpleNamespace(
+        finish_reason='stop',delta=SimpleNamespace(content=json.dumps(valid)))])]
+    assert parse_report(malformed,llm,{'model':'test'}) == valid
+    messages = llm.chat.completions.create.call_args.kwargs['messages']
+    assert malformed in messages[1]['content']
+    assert 'format editor only' in messages[0]['content']
+    assert llm.chat.completions.create.call_count == 1
+
+
+def test_format_repair_is_bounded_and_does_not_accept_invalid_output():
+    from zotero_arxiv_daily.reader_main import parse_report
+    llm=Mock(); llm.chat.completions.create.return_value=[SimpleNamespace(choices=[SimpleNamespace(
+        finish_reason='stop',delta=SimpleNamespace(content='{}'))])]
+    with pytest.raises(ValueError): parse_report('{}',llm,{'model':'test'})
+    assert llm.chat.completions.create.call_count == 1
