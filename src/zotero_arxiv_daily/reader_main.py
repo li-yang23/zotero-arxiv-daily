@@ -166,9 +166,27 @@ def analyze(job, resolver, llm, config, http):
     for kwargs in iter_generation_kwargs(config.llm):
         try:
             logger.info('Reading stage: calling model {}', kwargs.get('model'))
-            response=llm.chat.completions.create(messages=[{'role':'system','content':SYSTEM},{'role':'user','content':user}],**kwargs)
-            if response.choices[0].finish_reason=='length': raise ValueError('模型输出被截断')
-            result=json.loads(validate_result(response.choices[0].message.content or ''))
+            options = {k: v for k, v in kwargs.items() if k != 'stream'}
+            stream = llm.chat.completions.create(messages=[{'role':'system','content':SYSTEM},
+                {'role':'user','content':user}], stream=True, **options)
+            chunks = []
+            finish_reason = None
+            stream_started = time.monotonic()
+            try:
+                for chunk in stream:
+                    if time.monotonic() - stream_started > 600:
+                        raise TimeoutError('单个模型生成超过十分钟')
+                    if not chunk.choices:
+                        continue
+                    choice = chunk.choices[0]
+                    if choice.delta.content:
+                        chunks.append(choice.delta.content)
+                    if choice.finish_reason:
+                        finish_reason = choice.finish_reason
+            finally:
+                if hasattr(stream, 'close'): stream.close()
+            if finish_reason != 'stop': raise ValueError('模型输出未完整结束')
+            result=json.loads(validate_result(''.join(chunks)))
             result['sources']=sources
             result['paper_url']=paper.url
             return json.dumps(result,ensure_ascii=False), str(kwargs.get('model',''))
@@ -186,7 +204,7 @@ def run(config, *, client=None, resolver=None, llm=None, max_jobs=3, initial_job
         return
     paper_http = PublicPaperClient(timeout=30) if resolver is None else None
     resolver=resolver or ReadingPaperResolver(config, http_client=paper_http)
-    llm=llm or OpenAI(api_key=config.llm.api.key,base_url=config.llm.api.base_url,timeout=120,max_retries=1)
+    llm=llm or OpenAI(api_key=config.llm.api.key,base_url=config.llm.api.base_url,timeout=120,max_retries=0)
     started=time.monotonic()
     try:
         with httpx.Client(timeout=25) as http:

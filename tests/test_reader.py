@@ -68,7 +68,7 @@ def test_model_fallback_keeps_prompt_and_sources(monkeypatch):
     paper=SimpleNamespace(full_text='full paper '*100,title='Paper',url='https://arxiv.org/abs/2601.12345')
     resolver=Mock();resolver.resolve.return_value=SimpleNamespace(paper=paper)
     valid=json.dumps({'sections':[{'title':'Method','blocks':[{'type':'text','text':'analysis'}]}]})
-    llm=Mock();llm.chat.completions.create.side_effect=[RuntimeError('provider'),SimpleNamespace(choices=[SimpleNamespace(finish_reason='stop',message=SimpleNamespace(content=valid))])]
+    llm=Mock();llm.chat.completions.create.side_effect=[RuntimeError('provider'),[SimpleNamespace(choices=[SimpleNamespace(finish_reason='stop',delta=SimpleNamespace(content=valid))])]]
     config=OmegaConf.create({'llm':{'generation_kwargs':{'model':['bad','good']}}})
     result,model=analyze({'title':'Paper','url':paper.url,'prompt':'my exact prompt'},resolver,llm,config,None)
     assert model=='good' and json.loads(result)['sources']['status']=='retrieved'
