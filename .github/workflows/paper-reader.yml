@@ -15,7 +15,7 @@ jobs:
     env:
       PAPER_READER_URL: ${{ vars.PAPER_READER_URL }}
       PAPER_READER_TOKEN: ${{ secrets.PAPER_READER_TOKEN }}
-      PAPER_READER_JOB: ${{ runner.temp }}/paper-reader-job.json
+      PAPER_READER_JOB: .reader-job.json
     steps:
       - uses: actions/checkout@v6
       - name: Check for selected papers without installing ML dependencies

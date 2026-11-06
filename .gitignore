@@ -21,3 +21,6 @@ config/private.yaml
 
 # Private Sites checkout, published through its own source repository
 /reader-site/
+
+# Ephemeral claimed reading task (contains the private prompt)
+.reader-job.json
