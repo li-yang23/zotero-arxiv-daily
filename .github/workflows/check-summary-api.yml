@@ -30,8 +30,9 @@ jobs:
               os.environ['OPENAI_API_BASE'].rstrip('/') + '/chat/completions',
               data=json.dumps({
                   'model': os.environ['CHECK_MODEL'],
-                  'messages': [{'role': 'user', 'content': 'Reply OK.'}],
-                  'max_tokens': 16,
+                  'messages': [{'role': 'user', 'content': 'Return only a JSON object with a single field: {"status":"OK"}.'}],
+                  'response_format': {'type': 'json_object'},
+                  'max_tokens': 256,
               }).encode(),
               headers={
                   'Authorization': 'Bearer ' + os.environ['OPENAI_API_KEY'],
@@ -39,8 +40,18 @@ jobs:
               },
           )
           try:
-              with urllib.request.urlopen(request, timeout=20) as response:
+              with urllib.request.urlopen(request, timeout=45) as response:
                   print('Summary API HTTP status:', response.status)
+                  result = json.load(response)
+                  choices = result.get('choices') or []
+                  choice = choices[0] if choices else {}
+                  content = choice.get('message', {}).get('content') or ''
+                  print('Finish reason:', choice.get('finish_reason'))
+                  print('Content characters:', len(content))
+                  parsed = json.loads(content)
+                  if parsed.get('status') != 'OK':
+                      raise ValueError('Structured completion did not match the requested object')
+                  print('Structured completion validated.')
           except urllib.error.HTTPError as exc:
               body = json.loads(exc.read())
               print('Summary API HTTP status:', exc.code)
