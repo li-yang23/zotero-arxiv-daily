@@ -61,6 +61,13 @@ def test_validate_report_and_reject_invalid_graph():
     with pytest.raises(ValueError): validate_result(json.dumps(valid))
 
 
+def test_long_flow_labels_do_not_discard_complete_report():
+    label='输入、处理和输出的具体解释。'*30
+    report={'sections':[{'title':'Method','blocks':[{'type':'text','text':'Complete analysis'},
+        {'type':'flow','nodes':[label]*10,'caption':'A longer pipeline'}]}]}
+    assert json.loads(validate_result(json.dumps(report)))==report
+
+
 def test_model_fallback_keeps_prompt_and_sources(monkeypatch):
     import zotero_arxiv_daily.reader_main as module
     monkeypatch.setattr(module,'truncate_text_by_tokens',lambda text,n:text)

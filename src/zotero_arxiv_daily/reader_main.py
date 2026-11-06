@@ -136,7 +136,13 @@ def validate_result(content):
                 if not isinstance(block.get('text'),str): raise ValueError('正文格式错误')
                 has_text |= bool(block['text'].strip())
             elif block['type']=='flow':
-                if not isinstance(block.get('nodes'),list) or not 2<=len(block['nodes'])<=8 or not all(isinstance(n,str) and len(n)<=120 for n in block['nodes']): raise ValueError('流程图格式错误')
+                nodes=block.get('nodes')
+                if not isinstance(nodes,list) or not 2<=len(nodes)<=32:
+                    raise ValueError('流程图需包含 2–32 个节点')
+                # Layout preferences are not scientific validation errors. A
+                # longer label must never discard an otherwise complete report.
+                if not all(isinstance(n,str) and n.strip() and len(n)<=4000 for n in nodes):
+                    raise ValueError('流程图节点须为非空文字，单节点最多 4000 字')
             else:
                 import math
                 points=block.get('points')
@@ -196,7 +202,7 @@ def parse_report(content, llm, options, *, deadline=None):
         return json.loads(validate_result(repaired))
 
 
-def analyze(job, resolver, llm, config, http):
+def analyze(job, resolver, llm, config, http, *, on_draft=None):
     request=PaperRequest(title=job['title'],url=job['url'],input_index=0)
     logger.info('Reading stage: downloading full text for {}', job['title'])
     resolution=resolver.resolve(request)
@@ -219,6 +225,11 @@ def analyze(job, resolver, llm, config, http):
             logger.info('Reading stage: calling model {}', kwargs.get('model'))
             content = generate_json(llm, [{'role':'system','content':SYSTEM},
                 {'role':'user','content':user}], kwargs, timeout=min(300,remaining))
+            if on_draft:
+                try:
+                    on_draft(content,str(kwargs.get('model','')))
+                except Exception as exc:
+                    logger.warning('Could not retain raw reading draft: {}',type(exc).__name__)
             result = parse_report(content, llm, kwargs, deadline=deadline)
             result['sources']=sources
             result['paper_url']=paper.url
@@ -247,7 +258,9 @@ def run(config, *, client=None, resolver=None, llm=None, max_jobs=3, initial_job
                 if not job: break
                 payload={'id':job['id'],'lease':job['lease']}
                 try:
-                    result,model=analyze(job,resolver,llm,config,http)
+                    def save_draft(content,model):
+                        bridge.post('draft',{'id':job['id'],'lease':job['lease'],'content':content,'model':model})
+                    result,model=analyze(job,resolver,llm,config,http,on_draft=save_draft)
                     payload.update(status='completed',result=result,model=model)
                 except Exception as exc:
                     # Provider exception details may contain credentials or request text.
