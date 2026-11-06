@@ -2,7 +2,13 @@
 import json
 import os
 from pathlib import Path
-from urllib.request import Request, urlopen
+from urllib.request import Request, build_opener, HTTPRedirectHandler
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # Never forward the private service token to a sign-in or external host.
+        return None
+
 
 url = os.environ.get('PAPER_READER_URL', '').rstrip('/')
 token = os.environ.get('PAPER_READER_TOKEN', '')
@@ -13,7 +19,7 @@ if url and token:
         'OAI-Sites-Authorization': 'Bearer ' + token,
         'X-Reader-Token': token,
     })
-    with urlopen(request, timeout=45) as response:
+    with build_opener(NoRedirect()).open(request, timeout=45) as response:
         job = json.load(response).get('job')
 if job:
     path = Path(os.environ['PAPER_READER_JOB'])
