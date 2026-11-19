@@ -3,7 +3,7 @@ import io
 from pathlib import Path
 import sys
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, call
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'src'))
@@ -23,11 +23,10 @@ class ReaderEventsTests(unittest.TestCase):
         with patch.dict('os.environ', {'GITHUB_RUN_ID': str(run_id), 'GITHUB_RUN_ATTEMPT': attempt}):
             return self.client.post('claim', {})['job']
 
-    def event(self, **updates):
-        run = {'id': 10, 'run_attempt': 1, 'name': 'Read selected papers', 'status': 'completed',
-               'conclusion': 'success', 'head_branch': 'main', 'head_repository': {'full_name': 'owner/repo'}}
-        run.update(updates)
-        return {'repository': {'full_name': 'owner/repo', 'default_branch': 'main'}, 'workflow_run': run}
+    def context(self, **updates):
+        context = {'run_id': 10, 'run_attempt': 1, 'conclusion': 'success', 'branch': 'main'}
+        context.update(updates)
+        return context
 
     def test_interrupted_jobs_retry_three_times_then_stop(self):
         for run_id in range(1, 4):
@@ -69,29 +68,38 @@ class ReaderEventsTests(unittest.TestCase):
                                      'status': 'completed', 'result': '{"sections":[]}'} )
         self.state['jobs'].append({'id': 'two', 'status': 'queued', 'created': 1})
         self.client.request = Mock(return_value={})
-        self.assertTrue(finish(self.client, self.event()))
-        self.client.request.assert_called_once_with('POST', '/actions/workflows/paper-reader.yml/dispatches',
-                                                   {'ref': 'main', 'inputs': {'continuation': 'true'}})
+        self.assertTrue(finish(self.client, **self.context()))
+        self.client.request.assert_has_calls([
+            call('POST', '/actions/workflows/reader-pages.yml/dispatches', {'ref': 'main', 'inputs': {'check_changes': 'true'}}),
+            call('POST', '/actions/workflows/paper-reader.yml/dispatches', {'ref': 'main', 'inputs': {'continuation': 'true'}}),
+        ])
         self.assertEqual(self.state['jobs'][0]['status'], 'completed')
         self.assertEqual(self.state['jobs'][0]['result'], '{"sections":[]}')
 
-    def test_empty_queue_stops_without_dispatch(self):
+    def test_empty_queue_publishes_but_does_not_dispatch_more_reading(self):
         self.state['jobs'] = []
         self.client.request = Mock()
-        self.assertFalse(finish(self.client, self.event()))
-        self.client.request.assert_not_called()
+        self.assertFalse(finish(self.client, **self.context()))
+        self.client.request.assert_called_once_with('POST', '/actions/workflows/reader-pages.yml/dispatches',
+                                                   {'ref': 'main', 'inputs': {'check_changes': 'true'}})
 
     def test_skipped_unrelated_issues_do_not_start_queued_work(self):
         self.client.request = Mock()
-        for conclusion in ('skipped', 'neutral', 'cancelled'):
-            self.assertFalse(finish(self.client, self.event(conclusion=conclusion)))
+        for conclusion in ('skipped', 'cancelled'):
+            self.assertFalse(finish(self.client, **self.context(conclusion=conclusion)))
         self.client.request.assert_not_called()
 
-    def test_untrusted_completion_events_are_rejected(self):
-        for update in [{'head_branch': 'feature'}, {'head_repository': {'full_name': 'stranger/repo'}},
-                       {'name': 'Other'}, {'status': 'in_progress'}, {'id': -1}]:
+    def test_invalid_completion_context_is_rejected(self):
+        for update in [{'branch': ''}, {'run_id': -1}, {'run_attempt': 0}, {'conclusion': 'unknown'}]:
             with self.subTest(update=update), self.assertRaises(ValueError):
-                finish(self.client, self.event(**update))
+                finish(self.client, **self.context(**update))
+
+    def test_failed_publication_dispatch_does_not_strand_the_next_paper(self):
+        self.client.request = Mock(side_effect=[OSError('network'), {}])
+        with self.assertRaisesRegex(RuntimeError, 'reader-pages.yml'):
+            finish(self.client, **self.context())
+        self.assertEqual(self.client.request.call_count, 2)
+        self.assertEqual(self.client.request.call_args.args[1], '/actions/workflows/paper-reader.yml/dispatches')
 
     def test_dispatch_accepts_the_github_no_content_response(self):
         response = io.BytesIO(b'')

@@ -292,7 +292,7 @@ dotenv.load_dotenv()
 def main(config):
     path = os.environ.get('PAPER_READER_JOB')
     initial = json.loads(Path(path).read_text()) if path and Path(path).exists() else None
-    # One paper per event-driven run. Completion events dispatch the next job;
+    # One paper per event-driven run. The dependent job dispatches the next paper;
     # a hard timeout can then be attributed to exactly one bounded attempt.
     run(config, initial_job=initial, max_jobs=1)
 if __name__=='__main__': main()

@@ -49,3 +49,24 @@ jobs:
             printf '%s\n' "$CUSTOM_CONFIG" > config/custom.yaml
           fi
           uv run python -m zotero_arxiv_daily.reader_main
+
+  continue-and-publish:
+    # A job dependency runs for owner and bot dispatches alike. Do not rely on
+    # workflow_run: GitHub suppresses it after GITHUB_TOKEN-dispatched runs.
+    needs: read
+    if: ${{ always() && !cancelled() && needs.read.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Recover interrupted work, publish results and trigger the next paper
+        env:
+          GH_TOKEN: ${{ github.token }}
+          READER_CONCLUSION: ${{ needs.read.result }}
+          READER_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: python scripts/finish_reader_run.py

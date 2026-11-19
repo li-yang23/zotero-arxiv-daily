@@ -4,39 +4,19 @@ on:
     branches: [main]
     paths: ['reader-pages/**', 'scripts/build_reader_library.py', 'scripts/check_reader_publish.py', '.github/workflows/reader-pages.yml']
   workflow_dispatch:
+    inputs:
+      check_changes:
+        description: Publish only when the public library changed
+        type: boolean
+        default: false
   workflow_run:
-    workflows: ['Read selected papers', 'Send emails daily']
+    workflows: ['Send emails daily']
     types: [completed]
 permissions:
   contents: read
   pages: write
   id-token: write
 jobs:
-  continue-reader:
-    # Completion events survive worker errors/timeouts. Do not put this job in
-    # the Pages concurrency group: a newer deploy could replace a pending one.
-    if: >-
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.name == 'Read selected papers' &&
-      github.event.workflow_run.head_repository.full_name == github.repository &&
-      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
-      !contains(fromJSON('["cancelled", "skipped", "neutral"]'), github.event.workflow_run.conclusion)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
-      actions: write
-    concurrency:
-      group: reader-completion-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-      - name: Recover interrupted work and trigger the next queued paper
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python scripts/finish_reader_run.py
   publish:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
@@ -60,7 +40,7 @@ jobs:
         env:
           REPOSITORY: ${{ github.repository }}
           PAPER_READER_URL: ${{ vars.PAPER_READER_URL }}
-          FORCE_PUBLISH: ${{ github.event_name != 'workflow_run' }}
+          FORCE_PUBLISH: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.check_changes) }}
         run: python scripts/check_reader_publish.py reader-data/state.json
       - uses: actions/setup-node@v4
         if: steps.changes.outputs.changed == 'true'
