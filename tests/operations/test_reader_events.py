@@ -81,6 +81,12 @@ class ReaderEventsTests(unittest.TestCase):
         self.assertFalse(finish(self.client, self.event()))
         self.client.request.assert_not_called()
 
+    def test_skipped_unrelated_issues_do_not_start_queued_work(self):
+        self.client.request = Mock()
+        for conclusion in ('skipped', 'neutral', 'cancelled'):
+            self.assertFalse(finish(self.client, self.event(conclusion=conclusion)))
+        self.client.request.assert_not_called()
+
     def test_untrusted_completion_events_are_rejected(self):
         for update in [{'head_branch': 'feature'}, {'head_repository': {'full_name': 'stranger/repo'}},
                        {'name': 'Other'}, {'status': 'in_progress'}, {'id': -1}]:

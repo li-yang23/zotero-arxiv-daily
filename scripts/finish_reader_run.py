@@ -17,8 +17,11 @@ def finish(client, event):
             (run.get('head_repository') or {}).get('full_name') != client.repository or
             run.get('head_branch') != branch or run.get('status') != 'completed' or
             type(run.get('id')) is not int or run['id'] <= 0 or
-            run.get('conclusion') not in {'success', 'failure', 'timed_out', 'cancelled', 'action_required', 'startup_failure', 'stale'}):
+            run.get('conclusion') not in {'success', 'failure', 'timed_out', 'cancelled', 'skipped', 'neutral', 'action_required', 'startup_failure', 'stale'}):
         raise ValueError('Not a trusted default-branch reader completion event')
+    if run['conclusion'] in {'cancelled', 'skipped', 'neutral'}:
+        print('Reader did not execute or was cancelled; not starting further work.')
+        return False
     if not client.finish_run(run['id'], run.get('run_attempt', 1), run['conclusion']):
         print('No continuation needed; queue empty, cancelled, or worker failed before claiming work.')
         return False

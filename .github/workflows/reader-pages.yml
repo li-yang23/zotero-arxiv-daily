@@ -20,7 +20,7 @@ jobs:
       github.event.workflow_run.name == 'Read selected papers' &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
       github.event.workflow_run.head_branch == github.event.repository.default_branch &&
-      github.event.workflow_run.conclusion != 'cancelled'
+      !contains(fromJSON('["cancelled", "skipped", "neutral"]'), github.event.workflow_run.conclusion)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
