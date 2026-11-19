@@ -16,7 +16,7 @@ export default function Reader(){
  const download=()=>{if(!job?.result)return;const a=document.createElement('a');const url=URL.createObjectURL(new Blob(['# '+job.title+'\n\n'+reportMarkdown(job.result)+'\n\n原文：'+job.url],{type:'text/markdown;charset=utf-8'}));a.href=url;a.download='论文精读.md';a.click();URL.revokeObjectURL(url)};
  return <div className="shell"><header><a href={base} className="brand">论文精读<span>Paper Reader</span></a><nav><button className={view==='papers'?'active':''} onClick={()=>setView('papers')}>选论文</button><button className={view==='results'?'active':''} onClick={()=>setView('results')}>阅读结果 <small>{jobs.filter(j=>j.status==='completed').length}</small></button></nav><span className="private">公开阅读文库</span></header>
  <div className="intro"><div><p className="eyebrow">从每日推荐，到深入理解</p><h1>{view==='papers'?'挑出值得细读的论文。':'让阅读留下可回看的记录。'}</h1></div><p>选论文，设定你的问题。<br/>全文分析和阅读记录，保存在这里。</p></div>
- <BackendStatus repository={repository}/>
+ <BackendStatus repository={repository} jobs={jobs}/>
  {liveWarning&&<div role="status" className="notice">{liveWarning}</div>}
  {error&&<div role="alert" className="alert">{error}<button onClick={refresh}>重试</button></div>}
  {notice&&<div role="status" className="notice">{notice}</div>}

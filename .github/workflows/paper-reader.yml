@@ -6,12 +6,12 @@ on:
         description: Optional paper request JSON copied from the reader
         type: string
         required: false
+      continuation:
+        description: Internal continuation after a completed reading run
+        type: boolean
+        default: false
   issues:
     types: [opened, reopened, edited]
-  schedule:
-    # New owner Issues run immediately; hourly polling recovers missed events
-    # and drains batches without starting 144 empty runs per day.
-    - cron: '17 * * * *'
 permissions:
   contents: write
   issues: read
@@ -22,8 +22,8 @@ jobs:
   read:
     if: >-
       (github.event_name == 'issues' && github.event.issue.user.login == github.repository_owner && startsWith(github.event.issue.title, '[Paper Reader]')) ||
-      (github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner) ||
-      github.event_name == 'schedule'
+      (github.event_name == 'workflow_dispatch' && (github.actor == github.repository_owner ||
+        (github.actor == 'github-actions[bot]' && inputs.continuation && !inputs.request)))
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:

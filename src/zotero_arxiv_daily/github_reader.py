@@ -43,7 +43,7 @@ class GitHubReaderClient:
                 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json',
                 'X-GitHub-Api-Version': '2022-11-28'})
         with self.opener.open(req, timeout=45) as response:
-            return json.load(response)
+            return {} if response.status == 204 else json.load(response)
 
     def load(self):
         item = self.request('GET', '/contents/' + FILE + '?ref=' + BRANCH)
@@ -114,6 +114,30 @@ class GitHubReaderClient:
             if len(issues) < 100:
                 break
 
+    def finish_run(self, run_id, run_attempt, conclusion):
+        """Recover only leases owned by a finished run, never a newer worker.
+
+        An infrastructure failure before claiming any work must not create an
+        endless chain of new runs. A claimed paper has at most three attempts.
+        Cancellation is an explicit stop and does not automatically resume.
+        """
+        if conclusion == 'cancelled':
+            return False
+        def change(state):
+            owned = [j for j in state['jobs'] if j.get('run_id') == str(run_id)
+                     and j.get('run_attempt') == str(run_attempt)]
+            now = int(time.time() * 1000)
+            for job in owned:
+                if job['status'] != 'running':
+                    continue
+                if job.get('attempts', 0) >= 3:
+                    job.update(status='failed', error='精读任务连续三次中断，请检查运行日志后重新提交。', updated=now)
+                else:
+                    job.update(status='queued', updated=now)
+                job.pop('lease', None)
+            return (conclusion == 'success' or bool(owned)) and any(j['status'] == 'queued' for j in state['jobs'])
+        return self.mutate(change)
+
     def post(self, path, payload):
         if path == 'draft':
             # Unreviewed model drafts stay off the public library and repository.
@@ -139,6 +163,8 @@ class GitHubReaderClient:
                         job.pop('lease', None)
                     elif job['status'] == 'queued' or stale:
                         job.update(status='running', lease=lease, updated=now, attempts=job.get('attempts', 0) + 1)
+                        job['run_id'] = os.environ.get('GITHUB_RUN_ID', '')
+                        job['run_attempt'] = os.environ.get('GITHUB_RUN_ATTEMPT', '1')
                         return {'job': copy.deepcopy(job)}
                 return {'job': None}
             if path == 'complete':

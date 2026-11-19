@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {publicLiveLibrary,workflowNotice} from './reader-status.ts';
+import {publicLiveLibrary,workflowNotice,readerWorkflowNotice,unreceivedIssueNotice} from './reader-status.ts';
 
 const snapshot={repository:'owner/repo',prompt:'read',updated:1,digests:[],jobs:[]};
 test('live queue appears before Pages deploys and internal fields are excluded',()=>{
@@ -32,4 +32,25 @@ test('stalled schedules, stuck runs, failures and missing runs warn',()=>{
 
 test('unrelated skipped Issue events do not hide the latest real reader run',()=>{
   assert.equal(workflowNotice([{...run,conclusion:'skipped'},run],'精读任务',3,now),'');
+});
+
+test('an event-driven reader may be idle indefinitely without an outage warning',()=>{
+  assert.equal(readerWorkflowNotice([],[{id:'one',status:'completed',created:0}],now),'');
+  assert.equal(readerWorkflowNotice([{...run,created_at:'2026-01-01T00:00:00Z'}],[],now),'');
+});
+test('queued work warns when continuation never started but not during active reading',()=>{
+  const jobs=[{id:'one',status:'queued',created:now-3600000}];
+  assert.match(readerWorkflowNotice([run],jobs,now),/未启动下一轮/);
+  assert.equal(readerWorkflowNotice([{...run,status:'in_progress',created_at:'2026-11-19T03:50:00Z'}],jobs,now),'');
+  assert.match(readerWorkflowNotice([run],[{id:'one',status:'running',created:now-3600000,updated:now-3600000}],now),/没有更新/);
+});
+const requestId='3a5bb2fc-81d1-48aa-bbf6-ea75bb3295df';
+const issue={title:'[Paper Reader] 1 paper',state:'open',user:{login:'owner'},created_at:'2026-11-19T03:00:00Z',
+  body:'```json\n'+JSON.stringify({version:1,request_id:requestId,papers:[0]})+'\n```'};
+test('submitted Issues missing from the queue remain detectable when Actions is disabled',()=>{
+  assert.match(unreceivedIssueNotice([issue],[],'owner/repo',now),/未被后台接收/);
+  assert.equal(unreceivedIssueNotice([issue],[{id:requestId+':0',status:'failed'}],'owner/repo',now),'');
+  assert.equal(unreceivedIssueNotice([{...issue,updated_at:'2026-11-19T03:50:00Z'}],[],'owner/repo',now),'');
+  assert.equal(unreceivedIssueNotice([{...issue,user:{login:'stranger'}}],[],'owner/repo',now),'');
+  assert.equal(unreceivedIssueNotice([{...issue,body:'not JSON'}],[],'owner/repo',now),'');
 });
