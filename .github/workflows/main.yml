@@ -16,9 +16,13 @@ on:
 jobs:
   calculate-and-send:
     if: ${{ !inputs.venue_only }}
+    concurrency:
+      group: daily-arxiv-delivery
+      cancel-in-progress: false
     permissions:
       contents: write
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     steps:
       - name: Checkout
         uses: actions/checkout@v6

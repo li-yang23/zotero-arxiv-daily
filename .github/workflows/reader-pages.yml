@@ -2,7 +2,7 @@ name: Publish paper reader
 on:
   push:
     branches: [main]
-    paths: ['reader-pages/**', 'scripts/build_reader_library.py', '.github/workflows/reader-pages.yml']
+    paths: ['reader-pages/**', 'scripts/build_reader_library.py', 'scripts/check_reader_publish.py', '.github/workflows/reader-pages.yml']
   workflow_dispatch:
   workflow_run:
     workflows: ['Read selected papers', 'Send emails daily']
@@ -30,18 +30,29 @@ jobs:
         with:
           ref: reader-data
           path: reader-data
+      - name: Skip publication when the public library has not changed
+        id: changes
+        env:
+          REPOSITORY: ${{ github.repository }}
+          PAPER_READER_URL: ${{ vars.PAPER_READER_URL }}
+          FORCE_PUBLISH: ${{ github.event_name != 'workflow_run' }}
+        run: python scripts/check_reader_publish.py reader-data/state.json
       - uses: actions/setup-node@v4
+        if: steps.changes.outputs.changed == 'true'
         with:
           node-version: '22.16.0'
           cache: npm
           cache-dependency-path: reader-pages/package-lock.json
       - name: Prepare public library
+        if: steps.changes.outputs.changed == 'true'
         env:
           REPOSITORY: ${{ github.repository }}
         run: python scripts/build_reader_library.py reader-data/state.json reader-pages/public/data/library.json "$REPOSITORY"
       - uses: actions/configure-pages@v5
+        if: steps.changes.outputs.changed == 'true'
         id: pages
       - name: Build static reader
+        if: steps.changes.outputs.changed == 'true'
         working-directory: reader-pages
         env:
           PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}/
@@ -49,7 +60,9 @@ jobs:
           npm ci --no-audit --no-fund
           npm run build
       - uses: actions/upload-pages-artifact@v4
+        if: steps.changes.outputs.changed == 'true'
         with:
           path: reader-pages/dist
       - uses: actions/deploy-pages@v4
+        if: steps.changes.outputs.changed == 'true'
         id: deployment

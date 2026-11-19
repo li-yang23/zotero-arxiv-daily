@@ -7,9 +7,11 @@ on:
         type: string
         required: false
   issues:
-    types: [opened, reopened]
+    types: [opened, reopened, edited]
   schedule:
-    - cron: '3,13,23,33,43,53 * * * *'
+    # New owner Issues run immediately; hourly polling recovers missed events
+    # and drains batches without starting 144 empty runs per day.
+    - cron: '17 * * * *'
 permissions:
   contents: write
   issues: read
