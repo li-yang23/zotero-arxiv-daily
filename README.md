@@ -128,8 +128,9 @@ A single unavailable venue produces a warning in the run summary and digest; oth
 can still deliver successfully. Failed venues keep their last successful checkpoint and are
 checked again the next day. A total source outage, unresolved mail delivery, or failure to
 process any pending candidates still fails the job. GitHub state writes respect rate-limit
-wait times, retry transient errors with a bounded budget, and report the response message and
-request ID for permanent failures. Unchanged checkpoints do not create extra commits.
+wait times, retry transient errors (including GitHub rule-evaluation timeouts) with a bounded
+budget, and report the response message and request ID for permanent failures. Unchanged
+checkpoints do not create extra commits.
 
 Pages deployment retries once after 15 seconds if the first attempt fails, including when a
 just-uploaded artifact is not yet visible. Both attempts failing still fails publication.

@@ -33,6 +33,15 @@ def retry_delay(error, attempt):
             pass
         # Do not retry early when the server asks for a longer wait.
         return delay if delay <= 300 else None
+    if response.status_code == 403:
+        try:
+            # GitHub also uses 403 when its rule evaluation times out. This is
+            # distinct from a rule rejecting the write or a missing permission.
+            rule_timeout = response.json().get("message") == "The rule did not run because of a timeout."
+        except (ValueError, AttributeError):
+            rule_timeout = False
+        if rule_timeout:
+            return 10 * 2 ** attempt
     if response.status_code in {409, 500, 502, 503, 504}:
         return 2 ** attempt
     return None

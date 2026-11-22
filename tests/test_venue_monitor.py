@@ -353,8 +353,9 @@ def test_real_github_conflict_never_overwrites_another_writer():
     (403, {}, "You have exceeded a secondary rate limit.", 60),
     (429, {"retry-after": "90"}, "Slow down", 90),
     (403, {"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1080"}, "Limited", 81),
+    (403, {"x-ratelimit-remaining": "4995"}, "The rule did not run because of a timeout.", 10),
 ])
-def test_rate_limited_state_write_waits_before_readback_and_retry(monkeypatch, status, headers, message, delay):
+def test_transient_state_write_waits_before_readback_and_retry(monkeypatch, status, headers, message, delay):
     events = []
     monkeypatch.setattr("zotero_arxiv_daily.venue_state.sleep", lambda seconds: events.append(seconds))
     monkeypatch.setattr("zotero_arxiv_daily.venue_state.time", lambda: 1000)
