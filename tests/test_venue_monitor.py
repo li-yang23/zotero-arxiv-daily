@@ -7,7 +7,7 @@ import httpx
 from omegaconf import OmegaConf
 import pytest
 
-from zotero_arxiv_daily.venue_monitor import VenueMonitor, VenueReviewer, candidate, render_digest
+from zotero_arxiv_daily.venue_monitor import VenueMonitor, VenueReviewer, candidate, check_report, render_digest
 from zotero_arxiv_daily.venue_sources import VENUES, VenuePaper, VenueSources
 from zotero_arxiv_daily.venue_state import FileStateStore, GitHubStateStore
 
@@ -50,7 +50,7 @@ def test_all_14_checked_and_independent_digest_sent_once(tmp_path):
 
 
 def test_failed_source_does_not_block_other_venues_or_advance_watermark(tmp_path):
-    monitor, sources, _, store, _ = setup_monitor(tmp_path)
+    monitor, sources, _, store, send = setup_monitor(tmp_path)
     def fetch(venue, *_):
         if venue.name == "Nature":
             raise RuntimeError("unavailable")
@@ -60,7 +60,20 @@ def test_failed_source_does_not_block_other_venues_or_advance_watermark(tmp_path
     assert report["sent"] == 1
     assert report["venues"]["Nature"]["status"] == "failed"
     assert "Nature" not in store.load()["venues"]
-    assert report["errors"]
+    assert not report["errors"]
+    assert report["source_warnings"]
+    assert "Nature: RuntimeError: unavailable" in send.call_args.args[0]
+    check_report(report)
+
+
+def test_total_source_outage_still_fails(tmp_path):
+    monitor, sources, _, _, send = setup_monitor(tmp_path)
+    sources.fetch.side_effect = httpx.ConnectTimeout("timed out")
+    report = monitor.run(TODAY)
+    assert len(report["source_warnings"]) == len(VENUES)
+    assert not send.called
+    with pytest.raises(RuntimeError, match="所有论文来源"):
+        check_report(report)
 
 
 def test_review_failure_remains_pending_and_retries(tmp_path):
@@ -111,6 +124,8 @@ def test_smtp_uncertainty_is_persisted_before_send_and_never_blindly_retried(tmp
     report = monitor.run(TODAY)
     assert send.call_count == 1
     assert report["errors"] and report["sent"] == 0
+    with pytest.raises(RuntimeError, match="SMTP"):
+        check_report(report)
 
 
 def test_new_abstract_reconsiders_excluded_title(tmp_path):
@@ -332,3 +347,109 @@ def test_real_github_conflict_never_overwrites_another_writer():
     with pytest.raises(httpx.HTTPStatusError):
         store.save({"test": True})
     assert len(writes) == 1
+
+
+@pytest.mark.parametrize("status,headers,message,delay", [
+    (403, {}, "You have exceeded a secondary rate limit.", 60),
+    (429, {"retry-after": "90"}, "Slow down", 90),
+    (403, {"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1080"}, "Limited", 81),
+])
+def test_rate_limited_state_write_waits_before_readback_and_retry(monkeypatch, status, headers, message, delay):
+    events = []
+    monkeypatch.setattr("zotero_arxiv_daily.venue_state.sleep", lambda seconds: events.append(seconds))
+    monkeypatch.setattr("zotero_arxiv_daily.venue_state.time", lambda: 1000)
+    def handler(request):
+        events.append(request.method)
+        if request.method == "GET":
+            return httpx.Response(200, json={"sha": "original"})
+        if events.count("PUT") == 1:
+            return httpx.Response(status, headers=headers, json={"message": message})
+        return httpx.Response(200, json={"content": {"sha": "new"}})
+    store = GitHubStateStore(httpx.Client(transport=httpx.MockTransport(handler)), "owner/repo")
+    store.sha = "original"
+    store.save({"test": True})
+    assert events == ["PUT", delay, "GET", "PUT"]
+    assert store.sha == "new"
+
+
+def test_permission_rejection_is_not_retried_and_preserves_diagnostics():
+    calls = []
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(403, headers={"x-github-request-id": "request-123"},
+                              json={"message": "Resource not accessible by integration"})
+    store = GitHubStateStore(httpx.Client(transport=httpx.MockTransport(handler)), "owner/repo")
+    with pytest.raises(httpx.HTTPStatusError, match="Resource not accessible by integration") as error:
+        store.save({"private_content": "must-not-be-logged"})
+    assert len(calls) == 1
+    assert "request-123" in str(error.value)
+    assert "must-not-be-logged" not in str(error.value)
+
+
+def test_long_rate_limit_is_not_retried_early(monkeypatch):
+    sleep = Mock()
+    monkeypatch.setattr("zotero_arxiv_daily.venue_state.sleep", sleep)
+    client = httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(
+        429, headers={"retry-after": "3600"}, json={"message": "Rate limit exceeded"})))
+    with pytest.raises(httpx.HTTPStatusError):
+        GitHubStateStore(client, "owner/repo").save({"test": True})
+    sleep.assert_not_called()
+
+
+def test_rate_limit_retries_are_bounded(monkeypatch):
+    sleeps, writes = [], []
+    monkeypatch.setattr("zotero_arxiv_daily.venue_state.sleep", sleeps.append)
+    def handler(request):
+        if request.method == "GET":
+            return httpx.Response(200, json={"sha": "original"})
+        writes.append(request)
+        return httpx.Response(403, json={"message": "Secondary rate limit"})
+    store = GitHubStateStore(httpx.Client(transport=httpx.MockTransport(handler)), "owner/repo")
+    store.sha = "original"
+    with pytest.raises(httpx.HTTPStatusError):
+        store.save({"test": True})
+    assert len(writes) == 3 and sleeps == [60, 120, 240]
+
+
+def test_rate_limited_read_recovers(monkeypatch):
+    sleeps, calls = [], []
+    monkeypatch.setattr("zotero_arxiv_daily.venue_state.sleep", sleeps.append)
+    def handler(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(429, headers={"retry-after": "75"})
+        return httpx.Response(200, json={"sha": "current"})
+    store = GitHubStateStore(httpx.Client(transport=httpx.MockTransport(handler)), "owner/repo")
+    assert store.request("GET", "/contents/state.json") == {"sha": "current"}
+    assert sleeps == [75]
+
+
+def test_already_committed_write_is_reconciled_without_duplicate(monkeypatch):
+    import base64
+    import hashlib
+    monkeypatch.setattr("zotero_arxiv_daily.venue_state.sleep", lambda _: None)
+    writes, saved = [], {}
+    def handler(request):
+        if request.method == "GET":
+            return httpx.Response(200, json={"sha": saved["sha"]})
+        writes.append(request)
+        content = base64.b64decode(json.loads(request.content)["content"])
+        saved["sha"] = hashlib.sha1(f"blob {len(content)}\0".encode() + content).hexdigest()
+        raise httpx.ReadTimeout("response lost", request=request)
+    store = GitHubStateStore(httpx.Client(transport=httpx.MockTransport(handler)), "owner/repo")
+    store.sha = "original"
+    store.save({"test": True})
+    store.save({"test": True})  # An identical checkpoint should also avoid a PUT.
+    assert len(writes) == 1 and store.sha == saved["sha"]
+
+
+def test_source_timeout_is_retried_before_reporting_failure(monkeypatch):
+    monkeypatch.setattr("zotero_arxiv_daily.venue_sources.sleep", lambda _: None)
+    calls = []
+    def handler(request):
+        calls.append(request)
+        if len(calls) == 1:
+            raise httpx.ConnectTimeout("temporary outage", request=request)
+        return httpx.Response(200, text="recovered")
+    assert source_with(handler).get("https://www.ieee-security.org/test").text == "recovered"
+    assert len(calls) == 2

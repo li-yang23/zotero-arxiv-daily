@@ -125,8 +125,8 @@ def render_digest(records, today, report, balance=None):
             ])
     html.append(f"<hr><p>检查范围：{escape('、'.join(v.name for v in VENUES))}。")
     html.append(f"待补充摘要或待处理：{report.get('pending', 0)} 篇。公开索引可能晚于正式放榜，系统会继续检查。</p>")
-    if report["errors"]:
-        html.append("<p>部分来源本次检查失败，将在下次重试：" + escape("；".join(report["errors"])) + "</p>")
+    if report.get("source_warnings"):
+        html.append("<p>部分来源本次检查失败，将在下次重试：" + escape("；".join(report["source_warnings"])) + "</p>")
     if balance:
         html.append(f"<p>API 余额：{escape(balance)}</p>")
     html.append("</body></html>")
@@ -137,6 +137,14 @@ def render_digest(records, today, report, balance=None):
     ], title="顶会顶刊安全专题")
 
 
+def check_report(report, *, discover_only=False):
+    """Partial coverage is a warning; delivery uncertainty and total outage fail."""
+    if report["errors"]:
+        raise RuntimeError("；".join(report["errors"]))
+    if report["pending"] and report["deferred_errors"] and not report["sent"] and not discover_only:
+        raise RuntimeError("候选论文尚未成功总结，已保留重试；见专题检查报告")
+
+
 class VenueMonitor:
     def __init__(self, sources, reviewer, store, send, *, max_reviews=40, balance=None):
         self.sources, self.reviewer, self.store, self.send = sources, reviewer, store, send
@@ -145,7 +153,8 @@ class VenueMonitor:
     def run(self, today, *, discover_only=False):
         state = self.store.load()
         known = {alias: key for key, record in state["papers"].items() for alias in record.get("aliases", [])}
-        report = {"date": today.isoformat(), "venues": {}, "errors": [], "sent": 0, "pending": 0}
+        report = {"date": today.isoformat(), "venues": {}, "errors": [], "source_warnings": [],
+                  "sent": 0, "pending": 0}
         for venue in VENUES:
             try:
                 previous = state["venues"].get(venue.name, {})
@@ -180,8 +189,10 @@ class VenueMonitor:
             except Exception as exc:
                 message = f"{venue.name}: {type(exc).__name__}: {exc}"
                 report["venues"][venue.name] = {"status": "failed", "error": message}
-                report["errors"].append(message)
-                logger.error(message)
+                report["source_warnings"].append(message)
+                logger.warning(message)
+        if not any(result["status"] == "ok" for result in report["venues"].values()):
+            report["errors"].append("所有论文来源均检查失败，见专题检查报告")
         # Commit discovery as one checkpoint; persistence errors are not source failures.
         self.store.save(state)
 

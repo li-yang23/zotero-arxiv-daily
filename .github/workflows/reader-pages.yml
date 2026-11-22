@@ -26,7 +26,7 @@ jobs:
       cancel-in-progress: false
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment-retry.outputs.page_url }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -71,3 +71,14 @@ jobs:
       - uses: actions/deploy-pages@v4
         if: steps.changes.outputs.changed == 'true'
         id: deployment
+        continue-on-error: true
+        with:
+          timeout: 120000
+      - name: Allow uploaded files to become available before retrying deployment
+        if: ${{ !cancelled() && steps.deployment.outcome == 'failure' }}
+        run: sleep 15
+      - uses: actions/deploy-pages@v4
+        if: ${{ !cancelled() && steps.deployment.outcome == 'failure' }}
+        id: deployment-retry
+        with:
+          timeout: 120000

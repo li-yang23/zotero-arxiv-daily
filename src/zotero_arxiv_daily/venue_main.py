@@ -10,10 +10,11 @@ from zoneinfo import ZoneInfo
 import dotenv
 import hydra
 import httpx
+from loguru import logger
 from openai import OpenAI
 
 from .utils import fetch_api_balance, send_email
-from .venue_monitor import VenueMonitor, VenueReviewer
+from .venue_monitor import VenueMonitor, VenueReviewer, check_report
 from .venue_sources import VenueSources
 from .venue_state import FileStateStore, GitHubStateStore
 
@@ -46,6 +47,7 @@ def main(config):
         def send(html, *, subject):
             (output / "latest-digest.html").write_text(html, encoding="utf-8")
             send_email(config, html, subject=subject)
+            logger.info(f"SMTP accepted venue digest: {subject}")
 
         monitor = VenueMonitor(sources, VenueReviewer(llm, config.llm), store, send,
                                max_reviews=int(settings.max_reviews_per_run),
@@ -61,7 +63,7 @@ def main(config):
             if llm:
                 llm.close()
         if sources.warnings:
-            report["source_warnings"] = sources.warnings
+            report["source_warnings"].extend(sources.warnings)
         (output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         lines = [f"## 顶会顶刊每日检查 {today}", "", "| 来源 | 检查状态 | 获取 | 首次发现 |",
                  "| --- | --- | ---: | ---: |"]
@@ -69,7 +71,7 @@ def main(config):
             lines.append(f"| {name} | {result['status']} | {result.get('fetched', '-')} | {result.get('new', '-')} |")
         lines.extend(["", f"已发送 {report['sent']} 篇；待处理 {report['pending']} 篇。"])
         lines.extend(report["errors"])
-        lines.extend(sources.warnings)
+        lines.extend(report["source_warnings"])
         if report["deferred_errors"]:
             lines.append(f"{len(report['deferred_errors'])} 篇元数据/总结失败，已保留重试；详见 report.json。")
         summary = "\n".join(lines) + "\n"
@@ -77,10 +79,11 @@ def main(config):
         if os.environ.get("GITHUB_STEP_SUMMARY"):
             with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:
                 handle.write(summary)
-        if report["errors"]:
-            raise RuntimeError("部分来源或邮件状态检查失败，见专题检查报告")
-        if report["pending"] and report["deferred_errors"] and not report["sent"] and not discovery:
-            raise RuntimeError("候选论文尚未成功总结，已保留重试；见专题检查报告")
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            for warning in report["source_warnings"]:
+                safe = warning.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                print(f"::warning::{safe}")
+        check_report(report, discover_only=discovery)
 
 
 if __name__ == "__main__":
